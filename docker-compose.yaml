@@ -1,0 +1,58 @@
+services:
+  rabbitmq:
+    build:
+      context: ./rabbitmq
+      dockerfile: Dockerfile
+    ports:
+      - "5672:5672"    
+      - "15672:15672" 
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  client:
+    build:
+      context: .
+      dockerfile: ./client/Dockerfile
+    restart: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      gateway:
+        condition: service_started 
+    volumes:
+      - ./client/config.ini:/config.ini
+      - ./data/transaction_items_test.csv:/transaction_items_test.csv
+
+  gateway:
+    build:
+      context: .
+      dockerfile: ./server/gateway/Dockerfile
+    container_name: gateway
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+    volumes:
+      - ./server/config.ini:/app/config.ini
