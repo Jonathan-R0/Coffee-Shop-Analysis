@@ -60,8 +60,10 @@ Se comunicarán usando RabbitMQ. Se van a definir las siguiente colas por query:
 
 - Query 4:
     - `Gateway->Filter`: Cola de transacciones crudas.
-    - `Filter->Aggregator`: Cola de transacciones del 24 y 25.
-    - `Aggregator->Join`: Cola de transacciones contadas por usuario en cada tienda.
+    - `Filter->GroupBy`: Cola de transacciones del 24 y 25.
+    - `GroupBy->Aggregator`: Cola de transacciones agrupadas por usuario y tienda.
+    - `Aggregator->Filter`: Cola de transacciones contadas por usuario y tienda.
+    - `Filter->Join`: Cola de top 3 usuarios por tienda.
     - `Join->Report`: Cola de top 3 usuarios por tienda con metadata.
 
 Vamos a tener muchas colas repetidas entre queries:
