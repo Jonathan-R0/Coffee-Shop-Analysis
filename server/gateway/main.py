@@ -100,8 +100,12 @@ def main():
                         
                         for entity in protocol.parse_entities(message):
                             # Send entity with type information for downstream processing
-                            entity_data = f"{message.file_type}|{str(entity)}"
-                            middleware.send(entity_data)
+                            logger.info(f"Parsed entity: {entity}")
+                            
+                            # Convertir dataclass a diccionario para JSON serialization
+                            entity_dict = asdict(entity)
+                            item_json = json.dumps(entity_dict)
+                            middleware.send(item_json)
                             entity_count += 1
                             logger.info(f"{entity_type_name} published to RabbitMQ: {entity}")
                         
