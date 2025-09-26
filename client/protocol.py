@@ -7,14 +7,11 @@ from processor import BatchResult, TransactionItem
 logger = logging.getLogger(__name__)
 
 MAX_MESSAGE_SIZE = 65535
-EOF_FLAG_TRUE = 0x01
-EOF_FLAG_FALSE = 0x00
 
 class Protocol:    
     def __init__(self, conn: socket.socket):
         self.conn = conn
     
-
     def send_batch_message(self, batch_result: BatchResult) -> bool:
         try:
             batch_lines = []
