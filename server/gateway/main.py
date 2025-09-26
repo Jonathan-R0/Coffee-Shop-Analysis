@@ -41,27 +41,6 @@ def handle_shutdown(signal_received, frame):
     logger.info("Servidor detenido correctamente.")
     sys.exit(0)
 
-def process_transaction_items(items):
-    """Procesa cada item individualmente sin agrupar por transaction_id"""
-    
-    transaction_items = []
-    
-    for item in items:
-        item_dict = asdict(item)
-        
-        # Crear un registro individual para cada item
-        transaction_item = {
-            'transaction_id': item_dict['transaction_id'],
-            'item_id': item_dict['item_id'],
-            'quantity': item_dict['quantity'],
-            'unit_price': item_dict['unit_price'],
-            'subtotal': float(item_dict['subtotal']),
-            'created_at': item_dict['created_at']
-        }
-        transaction_items.append(transaction_item)
-    
-    return transaction_items
-
 def main():
     global server_socket, middleware
 
