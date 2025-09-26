@@ -129,6 +129,7 @@ class ServerProtocol:
         except Exception as e:
             logger.error(f"Error parsing entities: {e}")
 
+
     def parse_transaction_items(self, message: ProtocolMessage) -> Generator[TransactionItem, None, None]:
         for entity in self.parse_entities(message):
             if isinstance(entity, TransactionItem):
@@ -150,6 +151,7 @@ class ServerProtocol:
         except KeyError:
             return f'Unknown_{file_type}'
 
+
     def _send_ack(self, batch_id: int, status: int):
         try:
             # Pack ACK resp: ACK|<BATCH-ID>|<STATUS>|
@@ -162,6 +164,7 @@ class ServerProtocol:
     def _handle_exit_action(self):
         logger.info("Acción EXIT recibida. Cerrando conexión.")
         self.close()
+
 
     def _recv_all(self, num_bytes: int) -> bytes:
         data = bytearray()

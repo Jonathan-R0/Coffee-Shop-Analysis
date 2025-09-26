@@ -3,6 +3,7 @@ import os
 import json
 from datetime import datetime
 from rabbitmq.middleware import MessageMiddlewareQueue
+from filter_factory import FilterStrategyFactory
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,9 +16,9 @@ class FilterNode:
         self.output_queue = os.getenv('OUTPUT_QUEUE', None)
         
         self.filter_mode = os.getenv('FILTER_MODE', 'year')
-        self.filter_years = os.getenv('FILTER_YEARS', '2024,2025').split(',')
-        self.filter_hours = os.getenv('FILTER_HOURS', '06:00-23:00')
-        self.min_amount = float(os.getenv('MIN_AMOUNT', '75'))
+        
+        # Crear la estrategia de filtro usando la factory
+        self.filter_strategy = self._create_filter_strategy()
         
         self.input_middleware = MessageMiddlewareQueue(
             host=self.rabbitmq_host, 
@@ -33,83 +34,82 @@ class FilterNode:
         
         logger.info(f"FilterNode inicializado:")
         logger.info(f"  Modo: {self.filter_mode}")
+        logger.info(f"  Estrategia: {self.filter_strategy.get_filter_description() if self.filter_strategy else 'None'}")
         logger.info(f"  Queue entrada: {self.input_queue}")
         logger.info(f"  Queue salida: {self.output_queue}")
 
-    def _should_pass_filter(self, transaction):
+    def _create_filter_strategy(self):
+        """
+        Crea la estrategia de filtro apropiada basándose en la configuración.
+        
+        Returns:
+            FilterStrategy: Instancia de la estrategia correspondiente
+        """
         try:
+            config = {}
+            
             if self.filter_mode == 'year':
-                return self._filter_by_year(transaction)
+                config['filter_years'] = os.getenv('FILTER_YEARS', '2024,2025')
             elif self.filter_mode == 'hour':
-                return self._filter_by_hour(transaction)
+                config['filter_hours'] = os.getenv('FILTER_HOURS', '06:00-22:59')
             elif self.filter_mode == 'amount':
-                return self._filter_by_amount(transaction)
-            else:
-                logger.warning(f"Modo de filtro desconocido: {self.filter_mode}")
+                config['min_amount'] = float(os.getenv('MIN_AMOUNT', '75'))
+            
+            return FilterStrategyFactory.create_strategy(self.filter_mode, **config)
+            
+        except Exception as e:
+            logger.error(f"Error creando estrategia de filtro: {e}")
+            return None
+
+    def _should_pass_filter(self, transaction):
+        """
+        Evalúa si una transacción debe pasar el filtro usando la estrategia configurada.
+        
+        Args:
+            transaction (dict): Datos de la transacción a evaluar
+            
+        Returns:
+            bool: True si la transacción pasa el filtro, False en caso contrario
+        """
+        try:
+            if self.filter_strategy is None:
+                logger.warning("No hay estrategia de filtro configurada, dejando pasar la transacción")
                 return True
+                
+            logger.info(f"Aplicando filtro: {self.filter_strategy.get_filter_description()}")
+            return self.filter_strategy.should_pass(transaction)
                 
         except Exception as e:
             logger.error(f"Error aplicando filtro {self.filter_mode}: {e}")
             return False
 
-    def _filter_by_year(self, transaction):
-        logger.info(f"Aplicando filtro por año: {self.filter_years}")
-        
-        transaction_time = datetime.strptime(transaction.get("created_at"), "%Y-%m-%d %H:%M:%S")
-        year_passes = str(transaction_time.year) in self.filter_years
-        
-        if year_passes:
-            logger.info(f"Year filter PASS: {transaction.get('transaction_id')} ({transaction_time.year})")
-        else:
-            logger.info(f"Year filter REJECT: {transaction.get('transaction_id')} ({transaction_time.year})")
-            
-        return year_passes
-
-    def _filter_by_hour(self, transaction):
-        logger.debug(f"Aplicando filtro por hora: {self.filter_hours}")
-        
-        transaction_time = datetime.strptime(transaction.get("created_at"), "%Y-%m-%d %H:%M:%S")
-        
-        start_hour, end_hour = self.filter_hours.split('-')
-        start_time = datetime.strptime(start_hour, "%H:%M").time()
-        end_time = datetime.strptime(end_hour, "%H:%M").time()
-        
-        hour_passes = start_time <= transaction_time.time() <= end_time
-        
-        if hour_passes:
-            logger.debug(f"Hour filter PASS: {transaction.get('transaction_id')} ({transaction_time.time()})")
-        else:
-            logger.debug(f"Hour filter REJECT: {transaction.get('transaction_id')} ({transaction_time.time()})")
-            
-        return hour_passes
-
-    def _filter_by_amount(self, transaction):
-        logger.debug(f"Aplicando filtro por monto mínimo: ${self.min_amount}")
-        
-        transaction_amount = float(transaction.get("subtotal", 0))
-        amount_passes = transaction_amount >= self.min_amount
-        
-        if amount_passes:
-            logger.debug(f"Amount filter PASS: {transaction.get('transaction_id')} (${transaction_amount})")
-        else:
-            logger.debug(f"Amount filter REJECT: {transaction.get('transaction_id')} (${transaction_amount})")
-            
-        return amount_passes
-
     def process_message(self, message: str):
         try:
             transaction = json.loads(message)
+            
+            # Verificar si es una señal de finalización
+            if transaction.get('type') == 'FINISH':
+                logger.info(f"Señal de finalización recibida en filtro {self.filter_mode}")
+                
+                if self.output_middleware:
+                    # Propagar la señal al siguiente nodo
+                    self.output_middleware.send(message)
+                    logger.info(f"Señal de finalización propagada a {self.output_queue}")
+                else:
+                    logger.info("Señal de finalización recibida en nodo final")
+                return
+            
             transaction_id = transaction.get("transaction_id", "unknown")
             
             if not self._should_pass_filter(transaction):
-                logger.debug(f"Transacción rechazada por filtro {self.filter_mode}: {transaction_id}")
+                logger.info(f"Transacción rechazada por filtro {self.filter_mode}: {transaction_id}")
                 return
             
             logger.info(f"Transacción aprobada por filtro {self.filter_mode}: {transaction_id}")
             
             if self.output_middleware:
                 self.output_middleware.send(message)
-                logger.debug(f"Transacción enviada a {self.output_queue}: {transaction_id}")
+                logger.info(f"Transacción enviada a {self.output_queue}: {transaction_id}")
             else:
                 logger.info(f"RESULTADO FINAL - Transacción completamente filtrada: {transaction_id}")
                 logger.info(f"  Datos: {transaction}")

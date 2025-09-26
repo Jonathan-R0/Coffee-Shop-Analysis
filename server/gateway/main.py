@@ -42,23 +42,25 @@ def handle_shutdown(signal_received, frame):
     sys.exit(0)
 
 def process_transaction_items(items):
-    """Agrupa items por transaction_id y calcula subtotales"""
+    """Procesa cada item individualmente sin agrupar por transaction_id"""
     
-    transactions = {}
+    transaction_items = []
     
     for item in items:
         item_dict = asdict(item)
         
-        tx_id = item_dict['transaction_id'] 
-        if tx_id not in transactions:
-            transactions[tx_id] = {
-                'transaction_id': tx_id,
-                'subtotal': 0.0,
-                'created_at': item_dict['created_at']
-            }
-        transactions[tx_id]['subtotal'] += float(item_dict['subtotal'])
+        # Crear un registro individual para cada item
+        transaction_item = {
+            'transaction_id': item_dict['transaction_id'],
+            'item_id': item_dict['item_id'],
+            'quantity': item_dict['quantity'],
+            'unit_price': item_dict['unit_price'],
+            'subtotal': float(item_dict['subtotal']),
+            'created_at': item_dict['created_at']
+        }
+        transaction_items.append(transaction_item)
     
-    return list(transactions.values())
+    return transaction_items
 
 def main():
     global server_socket, middleware
@@ -106,6 +108,39 @@ def main():
                         logger.info(f"Total {entity_type_name} entities processed: {entity_count}")
                     else:
                         logger.warning(f"Unknown action: {message.action}")
+
+                total_items_sent = 0
+                
+                # Procesar y enviar cada batch inmediatamente
+              /*  while True:
+                    batch_result = protocol.receive_batch_message()
+                    if not batch_result:
+                        break
+                    
+                    transaction_items, is_eof = batch_result
+                    logger.info(f"Batch recibido: {len(transaction_items)} items")
+                    
+                    # Procesar y enviar este batch inmediatamente
+                    batch_processed = process_transaction_items(transaction_items)
+                    
+                    for item in batch_processed:
+                        item_json = json.dumps(item)
+                        middleware.send(item_json)
+                        total_items_sent += 1
+                        logger.info(f"Item enviado a RabbitMQ: {item['transaction_id']} - Item {item['item_id']} - ${item['subtotal']}")
+                    
+                    logger.info(f"Batch procesado y enviado: {len(batch_processed)} items")
+                    
+                    if is_eof:
+                        logger.info("EOF recibido, terminando recepción de batches")
+                        break
+                
+                # Enviar señal de finalización solo al final
+                if total_items_sent > 0:
+                    finish_signal = {"type": "FINISH", "total_items": total_items_sent}
+                    middleware.send(json.dumps(finish_signal))
+                    logger.info(f"Señal de finalización enviada con {total_items_sent} items totales") */
+
 
             except Exception as e:
                 logger.error(f"Error procesando conexión: {e}")
