@@ -92,39 +92,6 @@ def main():
                     else:
                         logger.warning(f"Unknown action: {message.action}")
 
-                total_items_sent = 0
-                
-                # Procesar y enviar cada batch inmediatamente
-                # while True:
-                #     batch_result = protocol.receive_batch_message()
-                #     if not batch_result:
-                #         break
-                    
-                #     transaction_items, is_eof = batch_result
-                #     logger.info(f"Batch recibido: {len(transaction_items)} items")
-                    
-                #     # Procesar y enviar este batch inmediatamente
-                #     batch_processed = process_transaction_items(transaction_items)
-                    
-                #     for item in batch_processed:
-                #         item_json = json.dumps(item)
-                #         middleware.send(item_json)
-                #         total_items_sent += 1
-                #         logger.info(f"Item enviado a RabbitMQ: {item['transaction_id']} - Item {item['item_id']} - ${item['subtotal']}")
-                    
-                #     logger.info(f"Batch procesado y enviado: {len(batch_processed)} items")
-                    
-                #     if is_eof:
-                #         logger.info("EOF recibido, terminando recepción de batches")
-                #         break
-                
-                # # Enviar señal de finalización solo al final
-                # if total_items_sent > 0:
-                #     finish_signal = {"type": "FINISH", "total_items": total_items_sent}
-                #     middleware.send(json.dumps(finish_signal))
-                #     logger.info(f"Señal de finalización enviada con {total_items_sent} items totales") 
-
-
             except Exception as e:
                 logger.error(f"Error procesando conexión: {e}")
             finally:
