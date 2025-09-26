@@ -8,7 +8,7 @@ Se comunicarán usando sockets TCP. El cliente enviará un mensaje de este estil
 
 ```
 <ACTION>|<FILE-TYPE>| <SIZE>  |<LAST-BATCH>|<DATA>
-4 bytes |  4 bytes  | 2 bytes |   1 byte   | n bytes
+4 bytes |  1 bytes  | 4 bytes |   1 byte   | n bytes
 ```
 
 Ejemplo:
@@ -27,6 +27,20 @@ También habrá un mensaje de exit:
 
 ```
 EXIT|XX|0|1|
+```
+
+A cada mensaje el gateway responderá con un ACK:
+
+```
+ACK|<BATCH-ID>|<STATUS>|
+4 bytes|4 bytes |1 byte |
+```
+
+Donde los códigos de estado son:
+```
+0 = Success
+1 = Retry
+2 = Error
 ```
 
 ### Gateway - Workers
