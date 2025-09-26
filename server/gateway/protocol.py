@@ -4,68 +4,10 @@ import socket
 import logging
 from typing import Generator, Optional, Union
 
-@dataclass
-class MenuItem:
-    item_id: int
-    item_name: str
-    category: str
-    price: float
-    is_seasonal: bool
-    available_from: str
-    available_to: str
-
-@dataclass
-class PaymentMethod:
-    payment_method_id: int
-    payment_method_name: str
-    processing_fee: float
-
-@dataclass
-class Store:
-    store_id: int
-    store_name: str
-    street: str
-    postal_code: str
-    city: str
-    state: str
-    latitude: float
-
-@dataclass
-class TransactionItem:
-    transaction_id: str
-    item_id: int
-    quantity: int
-    unit_price: float
-    subtotal: float
-    created_at: str
-
-@dataclass
-class Voucher:
-    voucher_id: int
-    voucher_code: str
-    discount_type: str
-    discount_value: float
-    valid_from: str
-    valid_to: str
-
-@dataclass
-class User:
-    user_id: int
-    gender: str
-    birthdate: str
-    registered_at: str
-
-@dataclass
-class Transaction:
-    transaction_id: str
-    store_id: int
-    payment_method_id: int
-    voucher_id: int
-    user_id: int
-    original_amount: float
-    discount_applied: float
-    final_amount: float
-    created_at: str
+from entities import (
+    BaseEntity, TransactionItem, 
+    get_entity_class, get_entity_name
+)
 
 @dataclass
 class ProtocolMessage:
@@ -166,38 +108,24 @@ class ServerProtocol:
             logger.error(f"Error parsing message: {e}")
             return None
 
-    def parse_entities(self, message: ProtocolMessage) -> Generator[Union[MenuItem, PaymentMethod, Store, TransactionItem, Voucher, User, Transaction], None, None]:
+    def parse_entities(self, message: ProtocolMessage) -> Generator[BaseEntity, None, None]:
         if not message.data.strip():
             return
 
         try:
+            entity_class = get_entity_class(message.file_type)
+            
             lines = message.data.strip().split('\n')
             for line in lines:
                 if not line.strip():
                     continue
                 
-                entity = None
-                if message.file_type == 'A':
-                    entity = self._parse_menu_item_line(line)
-                elif message.file_type == 'B':
-                    entity = self._parse_payment_method_line(line)
-                elif message.file_type == 'C':
-                    entity = self._parse_store_line(line)
-                elif message.file_type == 'D':
-                    entity = self._parse_transaction_item_line(line)
-                elif message.file_type == 'E':
-                    entity = self._parse_voucher_line(line)
-                elif message.file_type == 'F':
-                    entity = self._parse_user_line(line)
-                elif message.file_type == 'G':
-                    entity = self._parse_transaction_line(line)
-                else:
-                    logger.warning(f"Unknown file type: {message.file_type}")
-                    continue
-                
+                entity = entity_class.parse_line(line)
                 if entity:
                     yield entity
                     
+        except KeyError:
+            logger.warning(f"Unknown file type: {message.file_type}")
         except Exception as e:
             logger.error(f"Error parsing entities: {e}")
 
@@ -205,139 +133,6 @@ class ServerProtocol:
         for entity in self.parse_entities(message):
             if isinstance(entity, TransactionItem):
                 yield entity
-
-    def _parse_menu_item_line(self, line: str) -> Optional[MenuItem]:
-        try:
-            parts = line.split(',')
-            if len(parts) >= 7:
-                return MenuItem(
-                    item_id=int(parts[0].strip()),
-                    item_name=parts[1].strip(),
-                    category=parts[2].strip(),
-                    price=float(parts[3].strip()),
-                    is_seasonal=parts[4].strip().lower() in ('true', '1', 'yes'),
-                    available_from=parts[5].strip(),
-                    available_to=parts[6].strip()
-                )
-            else:
-                logger.warning(f"Invalid menu item data: {line}")
-                return None
-        except (ValueError, IndexError) as e:
-            logger.error(f"Error parsing menu item line '{line}': {e}")
-            return None
-
-    def _parse_payment_method_line(self, line: str) -> Optional[PaymentMethod]:
-        try:
-            parts = line.split(',')
-            if len(parts) >= 3:
-                return PaymentMethod(
-                    payment_method_id=int(parts[0].strip()),
-                    payment_method_name=parts[1].strip(),
-                    processing_fee=float(parts[2].strip())
-                )
-            else:
-                logger.warning(f"Invalid payment method data: {line}")
-                return None
-        except (ValueError, IndexError) as e:
-            logger.error(f"Error parsing payment method line '{line}': {e}")
-            return None
-
-    def _parse_store_line(self, line: str) -> Optional[Store]:
-        try:
-            parts = line.split(',')
-            if len(parts) >= 7:
-                return Store(
-                    store_id=int(parts[0].strip()),
-                    store_name=parts[1].strip(),
-                    street=parts[2].strip(),
-                    postal_code=parts[3].strip(),
-                    city=parts[4].strip(),
-                    state=parts[5].strip(),
-                    latitude=float(parts[6].strip())
-                )
-            else:
-                logger.warning(f"Invalid store data: {line}")
-                return None
-        except (ValueError, IndexError) as e:
-            logger.error(f"Error parsing store line '{line}': {e}")
-            return None
-
-    def _parse_transaction_item_line(self, line: str) -> Optional[TransactionItem]:
-        try:
-            parts = line.split(',')
-            if len(parts) >= 6:
-                return TransactionItem(
-                    transaction_id=parts[0].strip(),
-                    item_id=int(parts[1].strip()),
-                    quantity=int(parts[2].strip()),
-                    unit_price=float(parts[3].strip()),
-                    subtotal=float(parts[4].strip()),
-                    created_at=parts[5].strip()
-                )
-            else:
-                logger.warning(f"Invalid transaction item data: {line}")
-                return None
-        except (ValueError, IndexError) as e:
-            logger.error(f"Error parsing transaction item line '{line}': {e}")
-            return None
-
-    def _parse_voucher_line(self, line: str) -> Optional[Voucher]:
-        try:
-            parts = line.split(',')
-            if len(parts) >= 6:
-                return Voucher(
-                    voucher_id=int(parts[0].strip()),
-                    voucher_code=parts[1].strip(),
-                    discount_type=parts[2].strip(),
-                    discount_value=float(parts[3].strip()),
-                    valid_from=parts[4].strip(),
-                    valid_to=parts[5].strip()
-                )
-            else:
-                logger.warning(f"Invalid voucher data: {line}")
-                return None
-        except (ValueError, IndexError) as e:
-            logger.error(f"Error parsing voucher line '{line}': {e}")
-            return None
-
-    def _parse_user_line(self, line: str) -> Optional[User]:
-        try:
-            parts = line.split(',')
-            if len(parts) >= 4:
-                return User(
-                    user_id=int(parts[0].strip()),
-                    gender=parts[1].strip(),
-                    birthdate=parts[2].strip(),
-                    registered_at=parts[3].strip()
-                )
-            else:
-                logger.warning(f"Invalid user data: {line}")
-                return None
-        except (ValueError, IndexError) as e:
-            logger.error(f"Error parsing user line '{line}': {e}")
-            return None
-
-    def _parse_transaction_line(self, line: str) -> Optional[Transaction]:
-        try:
-            parts = line.split(',')
-            if len(parts) >= 9:
-                return Transaction(
-                    transaction_id=parts[0].strip(),
-                    store_id=int(parts[1].strip()),
-                    payment_method_id=int(parts[2].strip()),
-                    voucher_id=int(parts[3].strip()),
-                    user_id=int(parts[4].strip()),
-                    original_amount=float(parts[5].strip()),
-                    discount_applied=float(parts[6].strip()),
-                    final_amount=float(parts[7].strip()),
-                    created_at=parts[8].strip()
-                )
-            else:
-                logger.warning(f"Invalid transaction data: {line}")
-                return None
-        except (ValueError, IndexError) as e:
-            logger.error(f"Error parsing transaction line '{line}': {e}")
-            return None
 
     def parse_data_by_type(self, message: ProtocolMessage) -> Generator[str, None, None]:
         if not message.data.strip():
@@ -350,19 +145,12 @@ class ServerProtocol:
 
     @staticmethod
     def get_entity_type_name(file_type: str) -> str:
-        type_mapping = {
-            'A': 'MenuItem',
-            'B': 'PaymentMethod', 
-            'C': 'Store',
-            'D': 'TransactionItem',
-            'E': 'Voucher',
-            'F': 'User',
-            'G': 'Transaction'
-        }
-        return type_mapping.get(file_type, f'Unknown_{file_type}')
+        try:
+            return get_entity_name(file_type)
+        except KeyError:
+            return f'Unknown_{file_type}'
 
     def _send_ack(self, batch_id: int, status: int):
-        """Send ACK response to client"""
         try:
             # Pack ACK resp: ACK|<BATCH-ID>|<STATUS>|
             ack_data = struct.pack('>4sIB', b'ACK|', batch_id, status)
