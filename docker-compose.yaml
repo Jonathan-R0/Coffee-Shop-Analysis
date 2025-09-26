@@ -56,7 +56,43 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - FILTER_MODE=year
       - INPUT_QUEUE=raw_data
-     # - OUTPUT_QUEUE=year_filtered
+      - OUTPUT_QUEUE=year_filtered
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour  
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_QUEUE=hour_filtered
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered  
+      #- OUTPUT_QUEUE=amount_filtered
     volumes:
       - ./server/config.ini:/app/config.ini
 
