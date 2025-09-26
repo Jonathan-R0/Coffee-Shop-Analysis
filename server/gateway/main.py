@@ -49,16 +49,18 @@ def main():
                         logging.info("EXIT message received, closing connection")
                         break
                     elif message.action == "SEND":
-                        if message.file_type == 'A':
-                            # Parse as transaction items for file type A
-                            for item in protocol.parse_transaction_items(message):
-                                middleware.send(str(item))  
-                                logging.info(f"TransactionItem publicado en RabbitMQ: {item}")
-                        else:
-                            # For other file types, send raw data lines
-                            for data_line in protocol.parse_data_by_type(message):
-                                middleware.send(f"FILE_TYPE_{message.file_type}|{data_line}")
-                                logging.info(f"Data line publicado en RabbitMQ: FILE_TYPE_{message.file_type}|{data_line}")
+                        # Parse entities using the universal parser
+                        entity_count = 0
+                        entity_type_name = protocol.get_entity_type_name(message.file_type)
+                        
+                        for entity in protocol.parse_entities(message):
+                            # Send entity with type information for downstream processing
+                            entity_data = f"{message.file_type}|{str(entity)}"
+                            middleware.send(entity_data)
+                            entity_count += 1
+                            logging.info(f"{entity_type_name} published to RabbitMQ: {entity}")
+                        
+                        logging.info(f"Total {entity_type_name} entities processed: {entity_count}")
                     else:
                         logging.warning(f"Unknown action: {message.action}")
 

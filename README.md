@@ -21,7 +21,15 @@ SEND|A|50|0|2ae6d188-76c2-4095-b861-ab97d3cd9312,4,5,38.0,0.0,38.0,2023-07-01 07
 SEND|A|50|1|2ae6d188-76c2-4095-b861-ab97d3cd9312,4,5,38.0,0.0,38.0,2023-07-01 07:00:00,...\n
 ```
 
-Donde cada `<FILE-TYPE>` representa un tipo de archivo. Eso define la cantidad de columnas a leer.
+Donde cada `<FILE-TYPE>` representa un tipo de archivo. Los tipos de archivo son:
+
+- **A**: menu_items (item_id, item_name, category, price, is_seasonal, available_from, available_to)
+- **B**: payment_methods (payment_method_id, payment_method_name, processing_fee)
+- **C**: stores (store_id, store_name, street, postal_code, city, state, latitude)
+- **D**: transaction_items (transaction_id, item_id, quantity, unit_price, subtotal, created_at)
+- **E**: vouchers (voucher_id, voucher_code, discount_type, discount_value, valid_from, valid_to)
+- **F**: users (user_id, gender, birthdate, registered_at)
+- **G**: transactions (transaction_id, store_id, payment_method_id, voucher_id, user_id, original_amount, discount_applied, final_amount, created_at)
 
 También habrá un mensaje de exit:
 
