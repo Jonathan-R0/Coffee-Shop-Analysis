@@ -25,7 +25,12 @@ services:
         condition: service_started
     volumes:
       - ./client/config.ini:/config.ini
-      - ./data/transaction_items_202307.csv:/transaction_items_202307.csv
+      - ./data/transaction_items:/data/transaction_items
+      - ./data/users:/data/users
+      - ./data/stores:/data/stores
+      - ./data/menu_items:/data/menu_items
+      - ./data/payment_methods:/data/payment_methods
+      - ./data/vouchers:/data/vouchers
 
   gateway:
     build:

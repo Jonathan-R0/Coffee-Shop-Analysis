@@ -3,7 +3,7 @@ import struct
 import socket
 from typing import Generator, Optional, Union
 
-from entities import (
+from common.entities import (
     BaseEntity, TransactionItem, 
     get_entity_class, get_entity_name
 )

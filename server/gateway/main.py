@@ -5,7 +5,7 @@ import json
 import signal
 import sys
 from configparser import ConfigParser
-from protocol import ServerProtocol
+from common.protocol import Protocol
 from rabbitmq.middleware import MessageMiddlewareQueue
 from dataclasses import asdict 
 from logger import get_logger
@@ -62,7 +62,7 @@ def main():
             conn, addr = server_socket.accept()
             logger.info(f"Conexión aceptada desde {addr}")
 
-            protocol = ServerProtocol(conn)
+            protocol = Protocol(conn)
             
             try:
                 # Use the generator to receive messages
