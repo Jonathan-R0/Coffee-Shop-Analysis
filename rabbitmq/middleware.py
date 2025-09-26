@@ -193,7 +193,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 routing_key=self.queue_name,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=2  # Mensajes persistentes
+                    delivery_mode=2  
                 )
             )
             logger.info(f"Mensaje publicado en la cola {self.queue_name}: {message}")
@@ -231,6 +231,14 @@ class MessageMiddlewareQueue(MessageMiddleware):
             except Exception as e:
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
         return wrapper
+
+    def _callback_wrapper(self, ch, method, properties, body, on_message_callback):
+        try:
+            on_message_callback(ch, method, properties, body)
+            ch.basic_ack(delivery_tag=method.delivery_tag)  
+        except Exception as e:
+            logger.error(f"Error procesando mensaje: {e}")
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)  
 
     def stop_consuming(self):
         try:

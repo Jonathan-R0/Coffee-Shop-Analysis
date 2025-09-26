@@ -19,8 +19,8 @@ class Client:
             self.client_socket = socket.create_connection(('gateway', self.server_port))
             
             self.protocol = Protocol(self.client_socket)
-            
-            self.send_data("/transaction_items_test.csv")
+
+            self.send_data("transaction_items_202412.csv")
 
         except socket.error as err:
             logging.error(f"Socket error: {err}")
