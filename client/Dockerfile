@@ -1,4 +1,4 @@
-FROM rabbitmq-python-base:0.0.1
+FROM python:3.9-slim
 
 WORKDIR /app
 

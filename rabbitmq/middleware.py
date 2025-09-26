@@ -85,7 +85,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 routing_key=self.queue_name,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=2  # Mensajes persistentes
+                    delivery_mode=2  
                 )
             )
             logger.info(f"Mensaje publicado en la cola {self.queue_name}: {message}")
@@ -98,11 +98,15 @@ class MessageMiddlewareQueue(MessageMiddleware):
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
             
+            self.channel.basic_qos(prefetch_count=1)
+            
             logger.info(f"Esperando mensajes en la cola {self.queue_name}...")
             self.channel.basic_consume(
                 queue=self.queue_name,
-                on_message_callback=on_message_callback,
-                auto_ack=True
+                on_message_callback=lambda ch, method, properties, body: self._callback_wrapper(
+                    ch, method, properties, body, on_message_callback
+                ),
+                auto_ack=False 
             )
             self.channel.start_consuming()
         except pika.exceptions.AMQPConnectionError as e:
@@ -111,6 +115,14 @@ class MessageMiddlewareQueue(MessageMiddleware):
         except Exception as e:
             logger.error(f"Error durante el consumo de mensajes: {e}")
             raise MessageMiddlewareMessageError(f"Error durante el consumo de mensajes: {e}")
+
+    def _callback_wrapper(self, ch, method, properties, body, on_message_callback):
+        try:
+            on_message_callback(ch, method, properties, body)
+            ch.basic_ack(delivery_tag=method.delivery_tag)  
+        except Exception as e:
+            logger.error(f"Error procesando mensaje: {e}")
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)  
 
     def stop_consuming(self):
         try:

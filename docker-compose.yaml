@@ -25,7 +25,7 @@ services:
         condition: service_started 
     volumes:
       - ./client/config.ini:/config.ini
-      - ./data/transaction_items_test.csv:/transaction_items_test.csv
+      - ./data/transaction_items_202307.csv:/transaction_items_202307.csv
 
   gateway:
     build:
@@ -42,11 +42,11 @@ services:
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  filter:
+  filter_year:
     build:
       context: .
       dockerfile: ./server/filter/Dockerfile
-    container_name: filter
+    container_name: filter_year
     restart: on-failure
     depends_on:
       rabbitmq:
@@ -54,5 +54,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+     # - OUTPUT_QUEUE=year_filtered
     volumes:
       - ./server/config.ini:/app/config.ini
+

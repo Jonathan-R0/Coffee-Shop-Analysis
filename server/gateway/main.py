@@ -1,13 +1,19 @@
+from asyncio import sleep
 import logging
 import socket
-import logging
 import os
+import json
+import signal
+import sys
 from configparser import ConfigParser
 from protocol import ServerProtocol
 from rabbitmq.middleware import MessageMiddlewareQueue
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+server_socket = None
+middleware = None
 
 def initialize_config():
     config = ConfigParser(os.environ)
@@ -23,21 +29,39 @@ def initialize_config():
 
     return config_params
 
+def handle_shutdown(signal_received, frame):
+    global server_socket, middleware
+    logger.info("Recibiendo señal de terminación. Cerrando servidor...")
+    if server_socket:
+        server_socket.close()
+        logger.info("Socket del servidor cerrado.")
+    if middleware:
+        middleware.close()
+        logger.info("Conexión con RabbitMQ cerrada.")
+    logger.info("Servidor detenido correctamente.")
+    sys.exit(0)
 
 def main():
+    global server_socket, middleware
+
+    # Registrar señales para el shutdown
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
     config = initialize_config()
-    logging.info("Iniciando Servidor...")
+    logger.info("Iniciando Servidor...")
     rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
-    middleware = MessageMiddlewareQueue(host=rabbitmq_host, queue_name="data_queue")
+    middleware = MessageMiddlewareQueue(host=rabbitmq_host, queue_name="raw_data")
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(("0.0.0.0", config["port"]))
     server_socket.listen(5)
-    
+    logger.info(f"Servidor escuchando en el puerto {config['port']}")
+
     try:
         while True:
             conn, addr = server_socket.accept()
-            logging.info(f"Conexión aceptada desde {addr}")
+            logger.info(f"Conexión aceptada desde {addr}")
 
             protocol = ServerProtocol(conn)
             try:
@@ -47,20 +71,19 @@ def main():
                         break 
 
                     for item in transaction_items:
-                        middleware.send(str(item))  
-                        logging.info(f"Item publicado en RabbitMQ: {item}")
+                        item_json = json.dumps(item)
+                        middleware.send(item_json)
+                        logger.info(f"Item publicado en raw_data: {item['transaction_id']}")
 
             finally:
                 protocol.close()
-                logging.info(f"Conexión cerrada con {addr}")
+                logger.info(f"Conexión cerrada con {addr}")
+                sleep(60)
 
     except KeyboardInterrupt:
-        logging.info("Servidor detenido manualmente")
+        logger.info("Servidor detenido manualmente")
     finally:
-        server_socket.close()
-        middleware.close()
-        logging.info("Servidor cerrado")
-
+        handle_shutdown(None, None)
 
 if __name__ == "__main__":
     main()
