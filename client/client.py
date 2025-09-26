@@ -57,6 +57,12 @@ class Client:
                     logging.info("Último batch procesado")
                     break
             
+            # Enviar mensaje EXIT para cerrar la conexión correctamente
+            if self.protocol.send_exit_message():
+                logging.info("Mensaje EXIT enviado correctamente")
+            else:
+                logging.error("Error enviando mensaje EXIT")
+            
             logging.info(f"Procesamiento completado:")
             logging.info(f"  - Batches enviados: {batch_counter}")
             logging.info(f"  - Items totales: {total_items_sent}")

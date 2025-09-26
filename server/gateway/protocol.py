@@ -167,6 +167,7 @@ class ServerProtocol:
 
 
     def _recv_all(self, num_bytes: int) -> bytes:
+        logger.info(f"Attempting to read {num_bytes} bytes from socket")
         data = bytearray()
         while len(data) < num_bytes:
             packet = self.conn.recv(num_bytes - len(data))

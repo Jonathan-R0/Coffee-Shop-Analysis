@@ -19,8 +19,9 @@ class Protocol:
         try:
             batch_lines = []
             for item in batch_result.items:
-                line = f"{item.transaction_id};{item.item_id};{item.quantity};"
-                line += f"{item.unit_price};{item.subtotal};{item.created_at}"
+                # Usar comas como separador (según TransactionItem.parse_line())
+                line = f"{item.transaction_id},{item.item_id},{item.quantity},"
+                line += f"{item.unit_price},{item.subtotal},{item.created_at}"
                 batch_lines.append(line)
             
             message_content = "\n".join(batch_lines)
@@ -30,19 +31,32 @@ class Protocol:
                 return False
             
             message_size = len(message_content)
+            is_last_batch = batch_result.is_eof
             
-            eof_flag = EOF_FLAG_TRUE if batch_result.is_eof else EOF_FLAG_FALSE
-            
+            # Usar el protocolo del server: [ACTION(4)] + [FILE-TYPE(1)] + [SIZE(4)] + [LAST-BATCH(1)] + [DATA(N)]
             message = bytearray()
-            message.append(eof_flag)                                    # 1 byte: EOF flag
-            message.extend(struct.pack('>H', message_size))             # 2 bytes: tamaño (big endian)
-            message.extend(message_content.encode('utf-8'))             # N bytes: contenido
+            
+            # ACTION (4 bytes, padded with nulls)
+            action = "SEND"
+            message.extend(action.ljust(4, '\x00').encode('utf-8'))
+            
+            # FILE-TYPE (1 byte) - 'D' para transaction Items (según TransactionItem.get_file_type())
+            message.extend(b'D')
+            
+            # SIZE (4 bytes, big endian) 
+            message.extend(struct.pack('>I', message_size))
+            
+            # LAST-BATCH (1 byte)
+            message.extend(struct.pack('B', 1 if is_last_batch else 0))
+            
+            # DATA (N bytes)
+            message.extend(message_content.encode('utf-8'))
             
             success = self._send_all(bytes(message))
             
             if success:
                 logger.info(f"Batch enviado: {len(batch_result.items)} items, "
-                          f"EOF: {batch_result.is_eof}, Size: {message_size} bytes")
+                          f"LAST-BATCH: {is_last_batch}, Size: {message_size} bytes")
             
             return success
             
@@ -50,6 +64,38 @@ class Protocol:
             logger.error(f"Error enviando batch: {e}")
             return False
     
+    def send_exit_message(self) -> bool:
+        """
+        Envía mensaje EXIT para cerrar la conexión.
+        """
+        try:
+            # EXIT message: [ACTION(4)] + [FILE-TYPE(1)] + [SIZE(4)] + [LAST-BATCH(1)]
+            message = bytearray()
+            
+            # ACTION (4 bytes)
+            action = "EXIT"
+            message.extend(action.ljust(4, '\x00').encode('utf-8'))
+            
+            # FILE-TYPE (1 byte) - 'D' para consistencia (aunque no importa para EXIT)
+            message.extend(b'D')
+            
+            # SIZE (4 bytes) - 0 para EXIT
+            message.extend(struct.pack('>I', 0))
+            
+            # LAST-BATCH (1 byte) - true para EXIT
+            message.extend(struct.pack('B', 1))
+            
+            success = self._send_all(bytes(message))
+            
+            if success:
+                logger.info("Mensaje EXIT enviado")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error enviando EXIT: {e}")
+            return False
+
     def _send_all(self, data: bytes) -> bool:
         try:
             total_sent = 0
