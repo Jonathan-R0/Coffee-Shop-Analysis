@@ -58,6 +58,8 @@ class ServerProtocol:
             if not action_bytes:
                 logger.error("No se pudieron leer los 4 bytes del ACTION")
                 return None
+            
+            logger.info(f"Raw ACTION bytes: {action_bytes} (hex: {action_bytes.hex()})")
             action = action_bytes.decode('utf-8').rstrip('\x00').rstrip('|')
 
             if action == "EXIT":
