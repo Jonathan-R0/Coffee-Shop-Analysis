@@ -53,17 +53,21 @@ class FilterNode:
             return False
 
     def _filter_by_year(self, transaction):
+        logger.info(f"Aplicando filtro por año: {self.filter_years}")
+        
         transaction_time = datetime.strptime(transaction.get("created_at"), "%Y-%m-%d %H:%M:%S")
         year_passes = str(transaction_time.year) in self.filter_years
         
         if year_passes:
-            logger.debug(f"Year filter PASS: {transaction.get('transaction_id')} ({transaction_time.year})")
+            logger.info(f"Year filter PASS: {transaction.get('transaction_id')} ({transaction_time.year})")
         else:
-            logger.debug(f"Year filter REJECT: {transaction.get('transaction_id')} ({transaction_time.year})")
+            logger.info(f"Year filter REJECT: {transaction.get('transaction_id')} ({transaction_time.year})")
             
         return year_passes
 
     def _filter_by_hour(self, transaction):
+        logger.debug(f"Aplicando filtro por hora: {self.filter_hours}")
+        
         transaction_time = datetime.strptime(transaction.get("created_at"), "%Y-%m-%d %H:%M:%S")
         
         start_hour, end_hour = self.filter_hours.split('-')
@@ -80,6 +84,8 @@ class FilterNode:
         return hour_passes
 
     def _filter_by_amount(self, transaction):
+        logger.debug(f"Aplicando filtro por monto mínimo: ${self.min_amount}")
+        
         transaction_amount = float(transaction.get("subtotal", 0))
         amount_passes = transaction_amount >= self.min_amount
         
