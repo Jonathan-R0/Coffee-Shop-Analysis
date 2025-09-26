@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 import struct
 import socket
-import logging
 from typing import Generator, Optional, Union
 
 from entities import (
     BaseEntity, TransactionItem, 
     get_entity_class, get_entity_name
 )
+from logger import get_logger
 
 @dataclass
 class ProtocolMessage:
@@ -22,7 +22,7 @@ class AckResponse:
     batch_id: int
     status: int  # 0=Success, 1=Retry, 2=Error
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class ServerProtocol:
     def __init__(self, conn: socket.socket):

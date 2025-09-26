@@ -1,5 +1,4 @@
 import time
-import logging
 import socket
 import os
 import json
@@ -9,10 +8,9 @@ from configparser import ConfigParser
 from protocol import ServerProtocol
 from rabbitmq.middleware import MessageMiddlewareQueue
 from dataclasses import asdict 
+from logger import get_logger
 
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 server_socket = None
 middleware = None
@@ -88,10 +86,10 @@ def main():
             try:
                 # Use the generator to receive messages
                 for message in protocol.receive_messages():
-                    logging.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
+                    logger.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
                     
                     if message.action == "EXIT":
-                        logging.info("EXIT message received, closing connection")
+                        logger.info("EXIT message received, closing connection")
                         break
                     elif message.action == "SEND":
                         # Parse entities using the universal parser
@@ -103,11 +101,11 @@ def main():
                             entity_data = f"{message.file_type}|{str(entity)}"
                             middleware.send(entity_data)
                             entity_count += 1
-                            logging.info(f"{entity_type_name} published to RabbitMQ: {entity}")
+                            logger.info(f"{entity_type_name} published to RabbitMQ: {entity}")
                         
-                        logging.info(f"Total {entity_type_name} entities processed: {entity_count}")
+                        logger.info(f"Total {entity_type_name} entities processed: {entity_count}")
                     else:
-                        logging.warning(f"Unknown action: {message.action}")
+                        logger.warning(f"Unknown action: {message.action}")
 
             except Exception as e:
                 logger.error(f"Error procesando conexión: {e}")
