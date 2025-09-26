@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import struct
 import socket
 import logging
-from typing import List
+from typing import List, Tuple, Optional
 
 @dataclass
 class TransactionItem:
@@ -22,31 +22,31 @@ class ServerProtocol:
     def __init__(self, conn: socket.socket):
         self.conn = conn
 
-    def receive_batch_message(self) -> List[TransactionItem]:
+    def receive_batch_message(self):
         try:
             # Recibir el flag EOF (1 byte)
             eof_flag = self._recv_all(1)
             if not eof_flag:
                 logger.error("No se pudo leer el flag EOF")
-                return []
+                return None
             eof_flag = struct.unpack('B', eof_flag)[0]
 
             # Leer el tamaño del mensaje (2 bytes, big endian)
             message_size_data = self._recv_all(2)
             if not message_size_data:
                 logger.error("No se pudo leer el tamaño del mensaje")
-                return []
+                return None
             message_size = struct.unpack('>H', message_size_data)[0]
 
             if message_size > MAX_MESSAGE_SIZE:
                 logger.error(f"Mensaje demasiado grande: {message_size} bytes")
-                return []
+                return None
 
             # Leer el contenido del mensaje
             message_content = self._recv_all(message_size)
             if not message_content:
                 logger.error("No se pudo leer el contenido del mensaje")
-                return []
+                return None
 
             decoded_message = message_content.decode('utf-8')
             logger.info(f"Mensaje recibido: {decoded_message}")
@@ -54,14 +54,15 @@ class ServerProtocol:
             transaction_items = self._parse_batch(decoded_message)
             logger.info(f"Batch parseado: {len(transaction_items)} items")
 
-            if eof_flag == 0x01:
+            is_eof = eof_flag == 0x01
+            if is_eof:
                 logger.info("Se recibió el último batch (EOF)")
 
-            return transaction_items
+            return transaction_items, is_eof
 
         except Exception as e:
             logger.error(f"Error recibiendo batch: {e}")
-            return []
+            return None
 
     def _recv_all(self, num_bytes: int) -> bytes:
         data = bytearray()
