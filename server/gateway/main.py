@@ -84,7 +84,6 @@ def main():
             logger.info(f"Conexión aceptada desde {addr}")
 
             protocol = ServerProtocol(conn)
-            all_items = []
             
             try:
                 # Use the generator to receive messages
