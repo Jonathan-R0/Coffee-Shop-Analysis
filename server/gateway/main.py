@@ -42,7 +42,7 @@ def main():
             protocol = ServerProtocol(conn)
             try:
                 while True:
-                    transaction_items = protocol.receive_batch_message()
+                    transaction_items = protocol.receive_client_data()
                     if not transaction_items:
                         break 
 
