@@ -26,7 +26,7 @@ Donde cada `<FILE-TYPE>` representa un tipo de archivo. Eso define la cantidad d
 También habrá un mensaje de exit:
 
 ```
-EXIT|XX|0|1|
+EXIT
 ```
 
 A cada mensaje el gateway responderá con un ACK:
