@@ -1,5 +1,4 @@
 import time
-import logging
 import socket
 import os
 import json
@@ -9,10 +8,9 @@ from configparser import ConfigParser
 from protocol import ServerProtocol
 from rabbitmq.middleware import MessageMiddlewareQueue
 from dataclasses import asdict 
+from logger import get_logger
 
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 server_socket = None
 middleware = None
@@ -88,10 +86,33 @@ def main():
             protocol = ServerProtocol(conn)
             
             try:
+                # Use the generator to receive messages
+                for message in protocol.receive_messages():
+                    logger.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
+                    
+                    if message.action == "EXIT":
+                        logger.info("EXIT message received, closing connection")
+                        break
+                    elif message.action == "SEND":
+                        # Parse entities using the universal parser
+                        entity_count = 0
+                        entity_type_name = protocol.get_entity_type_name(message.file_type)
+                        
+                        for entity in protocol.parse_entities(message):
+                            # Send entity with type information for downstream processing
+                            entity_data = f"{message.file_type}|{str(entity)}"
+                            middleware.send(entity_data)
+                            entity_count += 1
+                            logger.info(f"{entity_type_name} published to RabbitMQ: {entity}")
+                        
+                        logger.info(f"Total {entity_type_name} entities processed: {entity_count}")
+                    else:
+                        logger.warning(f"Unknown action: {message.action}")
+
                 total_items_sent = 0
                 
                 # Procesar y enviar cada batch inmediatamente
-                while True:
+              /*  while True:
                     batch_result = protocol.receive_batch_message()
                     if not batch_result:
                         break
@@ -118,7 +139,8 @@ def main():
                 if total_items_sent > 0:
                     finish_signal = {"type": "FINISH", "total_items": total_items_sent}
                     middleware.send(json.dumps(finish_signal))
-                    logger.info(f"Señal de finalización enviada con {total_items_sent} items totales")
+                    logger.info(f"Señal de finalización enviada con {total_items_sent} items totales") */
+
 
             except Exception as e:
                 logger.error(f"Error procesando conexión: {e}")
