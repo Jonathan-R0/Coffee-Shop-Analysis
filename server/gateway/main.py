@@ -41,14 +41,26 @@ def main():
 
             protocol = ServerProtocol(conn)
             try:
-                while True:
-                    transaction_items = protocol.receive_client_data()
-                    if not transaction_items:
-                        break 
-
-                    for item in transaction_items:
-                        middleware.send(str(item))  
-                        logging.info(f"Item publicado en RabbitMQ: {item}")
+                # Use the generator to receive messages
+                for message in protocol.receive_messages():
+                    logging.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
+                    
+                    if message.action == "EXIT":
+                        logging.info("EXIT message received, closing connection")
+                        break
+                    elif message.action == "SEND":
+                        if message.file_type == 'A':
+                            # Parse as transaction items for file type A
+                            for item in protocol.parse_transaction_items(message):
+                                middleware.send(str(item))  
+                                logging.info(f"TransactionItem publicado en RabbitMQ: {item}")
+                        else:
+                            # For other file types, send raw data lines
+                            for data_line in protocol.parse_data_by_type(message):
+                                middleware.send(f"FILE_TYPE_{message.file_type}|{data_line}")
+                                logging.info(f"Data line publicado en RabbitMQ: FILE_TYPE_{message.file_type}|{data_line}")
+                    else:
+                        logging.warning(f"Unknown action: {message.action}")
 
             finally:
                 protocol.close()
