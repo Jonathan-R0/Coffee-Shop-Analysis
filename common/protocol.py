@@ -63,13 +63,26 @@ class Protocol:
             # DATA (N bytes)
             message.extend(message_content.encode('utf-8'))
             
+            # Enviar el mensaje
             success = self._send_all(bytes(message))
             
-            if success:
-                logger.info(f"Batch enviado: {len(batch_result.items)} items, "
-                            f"FILE-TYPE: {file_type}, LAST-BATCH: {is_last_batch}, Size: {message_size} bytes")
+            if not success:
+                return False
             
-            return success
+            # Esperar el ACK del servidor
+            ack_response = self._receive_ack()
+            if ack_response is None:
+                logger.error("No se recibió ACK del servidor")
+                return False
+            
+            if ack_response.status != 0:  # 0 = Success
+                logger.error(f"Server respondió con error: status={ack_response.status}")
+                return False
+            
+            logger.info(f"Batch enviado y confirmado: {len(batch_result.items)} items, "
+                        f"FILE-TYPE: {file_type}, LAST-BATCH: {is_last_batch}, Size: {message_size} bytes")
+            
+            return True
             
         except Exception as e:
             logger.error(f"Error enviando batch: {e}")
@@ -187,6 +200,33 @@ class Protocol:
         return lines
 
     # -------------------- COMMON METHODS --------------------
+
+    def _receive_ack(self) -> Optional[AckResponse]:
+        """Recibe un ACK del servidor."""
+        try:
+            # Leer ACK header (4 bytes: 'ACK|')
+            ack_header = self._recv_all(4)
+            if not ack_header or ack_header != b'ACK|':
+                logger.error(f"ACK header inválido: {ack_header}")
+                return None
+            
+            # Leer batch_id (4 bytes)
+            batch_id_bytes = self._recv_all(4)
+            if not batch_id_bytes:
+                return None
+            batch_id = struct.unpack('>I', batch_id_bytes)[0]
+            
+            # Leer status (1 byte)
+            status_bytes = self._recv_all(1)
+            if not status_bytes:
+                return None
+            status = struct.unpack('B', status_bytes)[0]
+            
+            return AckResponse(batch_id=batch_id, status=status)
+            
+        except Exception as e:
+            logger.error(f"Error recibiendo ACK: {e}")
+            return None
 
     def _send_ack(self, batch_id: int, status: int):
         """Envía un ACK al cliente."""
