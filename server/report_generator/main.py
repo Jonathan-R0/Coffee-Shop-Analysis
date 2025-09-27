@@ -26,17 +26,22 @@ class ReportGenerator:
 
     def process_message(self, message: bytes):
         """
-        Procesa un batch de transacciones en formato binario y las almacena para generar el reporte.
+        Procesa un batch de transacciones o una señal de control.
         """
         try:
             dto = TransactionBatchDTO.from_bytes(message)
-            logger.info(f"Batch recibido con {len(dto.transactions)} transacciones")
+
+            if dto.batch_type == "CONTROL":
+                logger.info("Señal de finalización recibida. Generando reporte final.")
+                self.save_report_to_file() 
+                self._cleanup()  
+                return
 
             self.items_processed.extend(dto.transactions)
             logger.info(f"Procesadas {len(dto.transactions)} transacciones. Total acumulado: {len(self.items_processed)}")
     
         except Exception as e:
-            logger.error(f"Error procesando mensaje: {e}.  Mensaje recibido: {message}")
+            logger.error(f"Error procesando mensaje: {e}. Mensaje recibido: {message}")
 
     def save_report_to_file(self):
         """

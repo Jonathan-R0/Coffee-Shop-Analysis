@@ -5,13 +5,15 @@ class TransactionBatchDTO:
     DTO para manejar batches de transacciones en formato binario.
     """
 
-    def __init__(self, transactions):
+    def __init__(self, transactions, batch_type="DATA"):
         """
-        Inicializa el DTO con una lista de transacciones.
+        Inicializa el DTO con una lista de transacciones y un tipo de batch.
         Args:
             transactions (list): Lista de diccionarios que representan las transacciones.
+            batch_type (str): Tipo de batch ("DATA" o "CONTROL").
         """
         self.transactions = transactions
+        self.batch_type = batch_type
 
     def to_bytes(self):
         """
@@ -19,6 +21,9 @@ class TransactionBatchDTO:
         Returns:
             bytes: Datos serializados.
         """
+        if self.batch_type == "CONTROL":
+            return "CONTROL:END".encode('utf-8')
+
         serialized = []
         for transaction in self.transactions:
             serialized.append(
@@ -37,7 +42,12 @@ class TransactionBatchDTO:
         Returns:
             TransactionBatchDTO: Instancia del DTO con las transacciones deserializadas.
         """
-        lines = data.decode('utf-8').strip().split('\n')
+        decoded_data = data.decode('utf-8').strip()
+
+        if decoded_data == "CONTROL:END":
+            return TransactionBatchDTO([], batch_type="CONTROL")
+
+        lines = decoded_data.split('\n')
         transactions = []
         for line in lines:
             values = line.split(',')
@@ -52,4 +62,4 @@ class TransactionBatchDTO:
                 "final_amount": values[7],
                 "created_at": values[8],
             })
-        return TransactionBatchDTO(transactions)
+        return TransactionBatchDTO(transactions, batch_type="DATA")

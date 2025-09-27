@@ -62,13 +62,19 @@ class FilterNode:
 
     def process_message(self, message: bytes):
         """
-        Procesa un batch de transacciones en formato binario, aplica el filtro y envía el resultado.
+        Procesa un batch de transacciones o una señal de control.
         """
         try:
             dto = TransactionBatchDTO.from_bytes(message)
-            
+
+            if dto.batch_type == "CONTROL":
+                logger.info("Señal de finalización recibida. Propagando al siguiente nodo.")
+                if self.output_middleware:
+                    self.output_middleware.send(message)
+                return
+
             filtered_transactions = self.filter_strategy.filter_batch(dto.transactions)
-            
+
             if not filtered_transactions:
                 return
 

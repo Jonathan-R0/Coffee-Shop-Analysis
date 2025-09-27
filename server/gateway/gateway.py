@@ -51,12 +51,16 @@ class Gateway:
         Procesa un mensaje de tipo 'D', utilizando el DTO para manejar los datos en formato binario.
         """
         try:
-            dto = TransactionBatchDTO.from_bytes(message.data.encode('utf-8'))
+            if message.action == "FINISH":
+                logger.info("Mensaje de finalización recibido. Creando DTO de tipo CONTROL.")
+                dto = TransactionBatchDTO([], batch_type="CONTROL")
+            else:
+                dto = TransactionBatchDTO.from_bytes(message.data.encode('utf-8'))
 
             serialized_data = dto.to_bytes()
 
             self._middleware.send(serialized_data)
-            logger.info(f"Batch completo enviado a RabbitMQ: {len(dto.transactions)} filas")
+            logger.info(f"Mensaje enviado a RabbitMQ: Tipo: {dto.batch_type}, Transacciones: {len(dto.transactions)}")
 
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'D': {e}")

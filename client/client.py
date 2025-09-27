@@ -82,8 +82,11 @@ class Client:
                     logger.info("Batch vacío, terminando...")
                     break
                 
-                self.protocol.send_batch_message(batch_result, file_type)
-            
+                success = self.protocol.send_batch_message(batch_result, file_type)
+                
+                if not success:
+                    logger.error("Error enviando batch o no se recibió ACK. Deteniendo el envío.")
+                    break
             
             logger.info(f"Procesamiento completado para {csv_filepath}")
             
