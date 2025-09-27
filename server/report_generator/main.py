@@ -20,6 +20,8 @@ class ReportGenerator:
         )
         
         self.items_processed = []
+        self.csv_file = None
+        self.csv_writer = None
         
         logger.info(f"ReportGenerator inicializado:")
         logger.info(f"  Queue entrada: {self.input_queue}")
@@ -32,14 +34,13 @@ class ReportGenerator:
             dto = TransactionBatchDTO.from_bytes(message)
 
             if dto.batch_type == "CONTROL":
-                logger.info("Señal de finalización recibida. Generando reporte final.")
-                self.save_report_to_file() 
+                logger.info("Señal de finalización recibida. Cerrando archivo y finalizando.")
+                self._close_csv_file() 
                 self._cleanup()  
                 return
 
-            self.items_processed.extend(dto.transactions)
-            logger.info(f"Procesadas {len(dto.transactions)} transacciones. Total acumulado: {len(self.items_processed)}")
-    
+            self._write_to_csv(dto.transactions)
+        
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}. Mensaje recibido: {message}")
 
@@ -90,15 +91,14 @@ class ReportGenerator:
         logger.info(f"Consumiendo de: {self.input_queue}")
         
         try:
+            self._initialize_csv_file()  
             self.input_middleware.start_consuming(self.on_message_callback)
         except KeyboardInterrupt:
             logger.info("ReportGenerator detenido manualmente")
         except Exception as e:
             logger.error(f"Error durante el consumo: {e}")
         finally:
-            if self.items_processed:
-                logger.info("Generando reporte final con datos pendientes...")
-                self.save_report_to_file()
+            self._close_csv_file()  
             self._cleanup()
 
     def _cleanup(self):
@@ -108,6 +108,58 @@ class ReportGenerator:
                 logger.info("Conexión cerrada")
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
+
+    def _initialize_csv_file(self):
+        """
+        Inicializa el archivo CSV y escribe los encabezados.
+        """
+        try:
+            reports_dir = './reports'
+            os.makedirs(reports_dir, exist_ok=True)
+            os.chmod(reports_dir, 0o755)
+
+            self.csv_filename = f"{reports_dir}/query1.csv"
+
+            self.csv_file = open(self.csv_filename, 'w', newline='', encoding='utf-8')
+            self.csv_writer = None
+            logger.info(f"Archivo CSV inicializado: {self.csv_filename}")
+
+        except Exception as e:
+            logger.error(f"Error inicializando el archivo CSV: {e}")
+            raise
+
+    def _write_to_csv(self, transactions):
+        """
+        Escribe las transacciones en el archivo CSV, incluyendo solo las columnas necesarias.
+        """
+        try:
+            filtered_transactions = [
+                {"transaction_id": transaction["transaction_id"], "final_amount": transaction["final_amount"]}
+                for transaction in transactions
+            ]
+
+            if not self.csv_writer:
+                headers = ["transaction_id", "final_amount"]
+                self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=headers)
+                self.csv_writer.writeheader()
+
+            self.csv_writer.writerows(filtered_transactions)
+
+        except Exception as e:
+            logger.error(f"Error escribiendo en el archivo CSV: {e}")
+            raise
+
+    def _close_csv_file(self):
+        """
+        Cierra el archivo CSV si está abierto.
+        """
+        try:
+            if hasattr(self, 'csv_file') and self.csv_file:
+                self.csv_file.close()
+                os.chmod(self.csv_filename, 0o644)
+                logger.info(f"Archivo CSV cerrado: {self.csv_filename}")
+        except Exception as e:
+            logger.error(f"Error cerrando el archivo CSV: {e}")
 
 if __name__ == "__main__":
     report_generator = ReportGenerator()

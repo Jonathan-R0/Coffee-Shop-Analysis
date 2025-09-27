@@ -35,7 +35,7 @@ class Client:
     def process_and_send_files_from_volumes(self):
         """Procesa y envía archivos desde las carpetas montadas como volúmenes."""
         mounted_folders = {
-            "D": "/data/transactions_test",
+            "D": "/data/transactions",
             #"D": "/data/transactions",
             #"D": "/data/transaction_items",
             #"users": "/data/users",

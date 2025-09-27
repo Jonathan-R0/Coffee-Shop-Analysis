@@ -50,7 +50,7 @@ class FilterNode:
             if self.filter_mode == 'year':
                 config['filter_years'] = os.getenv('FILTER_YEARS', '2024,2025')
             elif self.filter_mode == 'hour':
-                config['filter_hours'] = os.getenv('FILTER_HOURS', '06:00-22:59')
+                config['filter_hours'] = os.getenv('FILTER_HOURS', '06:00-23:00')
             elif self.filter_mode == 'amount':
                 config['min_amount'] = float(os.getenv('MIN_AMOUNT', '75'))
             
