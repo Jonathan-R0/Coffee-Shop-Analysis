@@ -196,7 +196,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
                     delivery_mode=2  
                 )
             )
-            logger.info(f"Mensaje publicado en la cola {self.queue_name}: {message}")
+            logger.info(f"Mensaje publicado en la cola {self.queue_name}")
         except Exception as e:
             logger.error(f"Error enviando mensaje: {e}")
             raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")

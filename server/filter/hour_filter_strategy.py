@@ -39,10 +39,7 @@ class HourFilterStrategy(FilterStrategy):
             transaction_id = transaction.get('transaction_id', 'unknown')
             if hour_passes:
                 self.count += 1
-                logger.info(f"Hour filter PASS: {transaction_id} ({transaction_time.time()})")
                 logger.info(f"Ammount of transactions passed the hour filter so far: {self.count}")
-            else:
-                logger.info(f"Hour filter REJECT: {transaction_id} ({transaction_time.time()})")
 
             return hour_passes
             

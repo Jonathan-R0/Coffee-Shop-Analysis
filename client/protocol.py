@@ -2,7 +2,7 @@ import struct
 import socket
 import logging
 from typing import List
-from processor import BatchResult, TransactionItem
+from common.processor import BatchResult, TransactionItem
 
 logger = logging.getLogger(__name__)
 

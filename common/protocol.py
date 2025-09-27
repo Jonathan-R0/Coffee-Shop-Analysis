@@ -3,12 +3,13 @@ import socket
 import logging
 from dataclasses import dataclass
 from typing import Generator, Optional, List
-from common.processor import BatchResult, TransactionItem
-from common.entities import BaseEntity, get_entity_class, get_entity_name
+from common.processor import BatchResult
 
 logger = logging.getLogger(__name__)
 
 MAX_MESSAGE_SIZE = 65535
+ACTION_EXIT = "EXIT"
+ACTION_SEND = "SEND"
 
 @dataclass
 class ProtocolMessage:
@@ -31,16 +32,11 @@ class Protocol:
     # -------------------- CLIENT METHODS --------------------
 
     def send_batch_message(self, batch_result: BatchResult, file_type: str) -> bool:
+        """Envía un batch de líneas al servidor."""
         try:
-            batch_lines = []
-            for item in batch_result.items:
-                # Usar comas como separador (según TransactionItem.parse_line())
-                line = f"{item.transaction_id},{item.item_id},{item.quantity},"
-                line += f"{item.unit_price},{item.subtotal},{item.created_at}"
-                batch_lines.append(line)
-            
-            message_content = "\n".join(batch_lines)
-            
+            # Unir las líneas con '\n' para formar el contenido del batch
+            message_content = "\n".join(batch_result.items)
+
             if len(message_content) > MAX_MESSAGE_SIZE:
                 logger.error(f"Mensaje demasiado largo: {len(message_content)} bytes")
                 return False
@@ -123,9 +119,6 @@ class Protocol:
                 
                 self._send_ack(self.batch_counter, 0)  # 0 = Success
                 self.batch_counter += 1
-                
-                if message.action == "EXIT" or message.last_batch:
-                    break
                     
         except Exception as e:
             logger.error(f"Error recibiendo mensajes: {e}")
@@ -184,51 +177,14 @@ class Protocol:
             logger.error(f"Error parsing message: {e}")
             return None
 
-    def parse_entities(self, message: ProtocolMessage) -> Generator[BaseEntity, None, None]:
-        """Parsea entidades desde un mensaje recibido."""
+    def parse_batch_lines(self, message: ProtocolMessage) -> List[str]:
+        """Parsea las líneas del batch desde un mensaje recibido."""
         if not message.data.strip():
-            return
+            return []
 
-        try:
-            entity_class = get_entity_class(message.file_type)
-            
-            lines = message.data.strip().split('\n')
-            for line in lines:
-                if not line.strip():
-                    continue
-                
-                entity = entity_class.parse_line(line)
-                if entity:
-                    yield entity
-                    
-        except KeyError:
-            logger.warning(f"Unknown file type: {message.file_type}")
-        except Exception as e:
-            logger.error(f"Error parsing entities: {e}")
-
-    def parse_transaction_items(self, message: ProtocolMessage) -> Generator[TransactionItem, None, None]:
-        """Parsea elementos de transacción desde un mensaje recibido."""
-        for entity in self.parse_entities(message):
-            if isinstance(entity, TransactionItem):
-                yield entity
-
-    def parse_data_by_type(self, message: ProtocolMessage) -> Generator[str, None, None]:
-        """Parsea datos genéricos desde un mensaje recibido."""
-        if not message.data.strip():
-            return
-
+        # Dividir el contenido del mensaje en líneas
         lines = message.data.strip().split('\n')
-        for line in lines:
-            if line.strip():
-                yield line.strip()
-
-    @staticmethod
-    def get_entity_type_name(file_type: str) -> str:
-        """Obtiene el nombre del tipo de entidad basado en el file_type."""
-        try:
-            return get_entity_name(file_type)
-        except KeyError:
-            return f'Unknown_{file_type}'
+        return lines
 
     # -------------------- COMMON METHODS --------------------
 

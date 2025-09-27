@@ -19,12 +19,13 @@ build: docker-image
 
 #Levanta todo el sistema CON logs visibles en la terminal
 docker-compose-up: docker-image
-	docker compose -f docker-compose.yaml up --build
+	docker compose -f docker-compose.yaml up --build -d
 .PHONY: docker-compose-up
 
 docker-compose-down:
 	docker compose -f docker-compose.yaml stop -t 1
 	docker compose -f docker-compose.yaml down
+	docker system prune -a --volumes
 .PHONY: docker-compose-down
 
 docker-compose-logs:

@@ -29,16 +29,13 @@ class AmountFilterStrategy(FilterStrategy):
             bool: True si el monto de la transacción es mayor o igual al mínimo
         """
         try:
-            transaction_amount = float(transaction.get("subtotal", 0))
+            transaction_amount = float(transaction.get("final_amount", 0))
             amount_passes = transaction_amount >= self.min_amount
             
             transaction_id = transaction.get('transaction_id', 'unknown')
             if amount_passes:
                 self.count += 1
-                logger.info(f"Amount filter PASS: {transaction_id} (${transaction_amount})")
                 logger.info(f"Ammount of transactions passed the amount filter so far: {self.count}")
-            else:
-                logger.info(f"Amount filter REJECT: {transaction_id} (${transaction_amount})")
 
             return amount_passes
             

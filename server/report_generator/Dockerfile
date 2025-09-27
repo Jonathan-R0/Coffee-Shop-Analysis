@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY rabbitmq/ ./rabbitmq/
 COPY server/report_generator/ ./
 COPY server/config.ini ./config.ini
+COPY ./server/dtos/ ./dtos/
 
 # Crear directorio para reportes
 RUN mkdir -p /app/reports

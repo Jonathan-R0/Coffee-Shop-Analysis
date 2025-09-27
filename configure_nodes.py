@@ -38,6 +38,7 @@ def base_services_setup(f):
         "      - ./data/payment_methods:/data/payment_methods\n"
         "      - ./data/vouchers:/data/vouchers\n\n"
         "      - ./data/transactions:/data/transactions\n\n"
+        "      - ./data/transactions_test:/data/transactions_test\n\n"
         
         "  gateway:\n"
         "    build:\n"
@@ -51,6 +52,7 @@ def base_services_setup(f):
         "    environment:\n"
         "      - PYTHONUNBUFFERED=1\n"
         "      - RABBITMQ_HOST=rabbitmq\n"
+        "      - OUTPUT_QUEUE=raw_data\n"
         "    volumes:\n"
         "      - ./server/config.ini:/app/config.ini\n\n"
     )

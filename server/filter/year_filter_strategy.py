@@ -36,10 +36,7 @@ class YearFilterStrategy(FilterStrategy):
             transaction_id = transaction.get('transaction_id', 'unknown')
             if year_passes:
                 self.count += 1
-                logger.info(f"Year filter PASS: {transaction_id} ({transaction_time.year})")
                 logger.info(f"Ammount of transactions passed the year filter so far: {self.count}")
-            else:
-                logger.info(f"Year filter REJECT: {transaction_id} ({transaction_time.year})")
                 
             return year_passes
             

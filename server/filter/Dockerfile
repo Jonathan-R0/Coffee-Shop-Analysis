@@ -5,6 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 COPY ./server/filter/ .
 COPY ./rabbitmq/ ./rabbitmq/
+COPY ./server/dtos/ ./dtos/
 
 RUN pip install --no-cache-dir -r requirements.txt
 
