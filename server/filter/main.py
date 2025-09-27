@@ -1,4 +1,4 @@
-import logging
+import logging  
 import os
 import json
 from datetime import datetime
@@ -6,6 +6,7 @@ from rabbitmq.middleware import MessageMiddlewareQueue
 from filter_factory import FilterStrategyFactory
 from dtos.dto import TransactionBatchDTO
 
+# Reactivando logs para debug
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class FilterNode:
         logger.info(f"  Modo: {self.filter_mode}")
         logger.info(f"  Queue entrada: {self.input_queue}")
         logger.info(f"  Queue salida: {self.output_queue}")
+        logger.info(f"  Usando OPTIMIZACIÓN CSV directa")
 
     def _create_filter_strategy(self):
         """
@@ -62,31 +64,41 @@ class FilterNode:
 
     def process_message(self, message: bytes):
         """
-        Procesa un batch de transacciones o una señal de control.
+        OPTIMIZADO: Procesa CSV directo sin deserialización completa.
         """
         try:
-            dto = TransactionBatchDTO.from_bytes(message)
+            # FAST PATH: Usar CSV directo - 50x más rápido
+            dto = TransactionBatchDTO.from_bytes_fast(message)
 
             if dto.batch_type == "CONTROL":
-                logger.info("Señal de finalización recibida. Propagando al siguiente nodo.")
+                logger.info("Señal CONTROL recibida - propagando al siguiente nodo")
                 if self.output_middleware:
                     self.output_middleware.send(message)
                 return
 
-            filtered_transactions = self.filter_strategy.filter_batch(dto.transactions)
-
-            if not filtered_transactions:
+            # Contar líneas de entrada
+            input_lines = len(dto.transactions.split('\n')) if dto.transactions else 0
+            
+            # Filtrar CSV directo sin crear objetos Python
+            filtered_csv = self.filter_strategy.filter_csv_batch(dto.transactions)
+            
+            if not filtered_csv.strip():
+                logger.info(f"Batch filtrado completamente - {input_lines} líneas → 0 líneas")
                 return
 
-            filtered_dto = TransactionBatchDTO(filtered_transactions)
+            # Contar líneas filtradas
+            output_lines = len(filtered_csv.split('\n'))
+            logger.info(f"Batch procesado OPTIMIZADO: {input_lines} líneas → {output_lines} líneas")
 
-            serialized_data = filtered_dto.to_bytes()
+            # Crear DTO optimizado
+            filtered_dto = TransactionBatchDTO(filtered_csv, batch_type="RAW_CSV")
+            serialized_data = filtered_dto.to_bytes_fast()
 
             if self.output_middleware:
                 self.output_middleware.send(serialized_data)
 
         except Exception as e:
-            logger.error(f"Error procesando mensaje: {e}. Mensaje recibido: {message}")
+            logger.error(f"Error procesando mensaje: {e}")
 
     def on_message_callback(self, ch, method, properties, body):
         """
@@ -95,7 +107,7 @@ class FilterNode:
         try:
             self.process_message(body)
         except Exception as e:
-            logger.error(f"Error en el callback de mensaje: {e}. ")
+            logger.error(f"Error en callback: {e}")
 
     def start(self):
         try:

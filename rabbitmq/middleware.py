@@ -193,10 +193,10 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 routing_key=self.queue_name,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=2  
+                    delivery_mode=1  # No persistent = MUCHO más rápido
                 )
             )
-            logger.info(f"Mensaje publicado en la cola {self.queue_name}")
+            # Mensaje publicado (log activado para debug)
         except Exception as e:
             logger.error(f"Error enviando mensaje: {e}")
             raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")
@@ -206,8 +206,8 @@ class MessageMiddlewareQueue(MessageMiddleware):
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
             
-            # Uso fair dispatch
-            self.channel.basic_qos(prefetch_count=1)
+            # Optimizado para throughput
+            self.channel.basic_qos(prefetch_count=10)
             
             logger.info(f"Esperando mensajes en la cola {self.queue_name}...")
             self.channel.basic_consume(

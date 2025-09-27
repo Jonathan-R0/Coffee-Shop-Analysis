@@ -34,3 +34,47 @@ class FilterStrategy(ABC):
                 filtered_batch.append(transaction)
         
         return filtered_batch
+
+    def should_keep_line(self, csv_line: str) -> bool:
+        """
+        OPTIMIZADO: Filtra línea CSV directo sin parsear a dict.
+        Implementar en subclases para máximo rendimiento.
+        Args:
+            csv_line (str): Línea CSV raw
+        Returns:
+            bool: True si la línea pasa el filtro
+        """
+        # Fallback: parsear y usar should_pass (más lento)
+        parts = csv_line.split(',')
+        if len(parts) < 9:
+            return False
+        
+        transaction = {
+            "transaction_id": parts[0],
+            "store_id": parts[1], 
+            "payment_method_id": parts[2],
+            "voucher_id": parts[3],
+            "user_id": parts[4],
+            "original_amount": parts[5],
+            "discount_applied": parts[6],
+            "final_amount": parts[7],
+            "created_at": parts[8],
+        }
+        return self.should_pass(transaction)
+
+    def filter_csv_batch(self, csv_data: str) -> str:
+        """
+        OPTIMIZADO: Filtra CSV completo sin deserialización.
+        Args:
+            csv_data (str): Datos CSV raw
+        Returns:
+            str: CSV filtrado
+        """
+        lines = csv_data.split('\n')
+        filtered_lines = []
+        
+        for line in lines:
+            if line.strip() and self.should_keep_line(line):
+                filtered_lines.append(line)
+        
+        return '\n'.join(filtered_lines)
