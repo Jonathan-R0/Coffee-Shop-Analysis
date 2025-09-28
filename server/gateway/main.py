@@ -25,6 +25,7 @@ def initialize_config():
         config_params["listener_backlog"] = int(os.getenv('SERVER_LISTEN_BACKLOG', config["DEFAULT"]["SERVER_LISTEN_BACKLOG"]))
         config_params["rabbitmq_host"] = os.getenv('RABBITMQ_HOST', config["DEFAULT"]["RABBITMQ_HOST"])
         config_params["output_queue"] = os.getenv('OUTPUT_QUEUE', config["DEFAULT"]["OUTPUT_QUEUE"])
+        config_params["reports_exchange"] = os.getenv('REPORTS_EXCHANGE', config.get("DEFAULT", "REPORTS_EXCHANGE", fallback=None))
     except KeyError as e:
         raise KeyError("Key was not found. Error: {} .Aborting server".format(e))
     except ValueError as e:
@@ -47,8 +48,9 @@ def main():
     listener_backlog = config["listener_backlog"]
     rabbitmq_host = config["rabbitmq_host"]
     output_queue = config["output_queue"]
+    reports_exchange = config["reports_exchange"]
 
-    gateway = Gateway(port, listener_backlog, rabbitmq_host, output_queue)
+    gateway = Gateway(port, listener_backlog, rabbitmq_host, output_queue, reports_exchange)
     gateway.start()
 
 if __name__ == "__main__":

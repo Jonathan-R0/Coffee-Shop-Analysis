@@ -3,7 +3,7 @@ import os
 import json
 import csv
 from datetime import datetime
-from rabbitmq.middleware import MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO
 
 logging.basicConfig(level=logging.INFO)
@@ -13,6 +13,8 @@ class ReportGenerator:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.input_queue = os.getenv('INPUT_QUEUE', 'final_data')
+        self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'reports_exchange')
+        self.query_type = os.getenv('QUERY_TYPE', 'query1')
         
         self.input_middleware = MessageMiddlewareQueue(
             host=self.rabbitmq_host, 
@@ -25,6 +27,8 @@ class ReportGenerator:
         
         logger.info(f"ReportGenerator inicializado:")
         logger.info(f"  Queue entrada: {self.input_queue}")
+        logger.info(f"  Exchange salida: {self.output_exchange}")
+        logger.info(f"  Tipo de query: {self.query_type}")
 
     def process_message(self, message: bytes):
         """
@@ -39,8 +43,8 @@ class ReportGenerator:
                 self._cleanup()  
                 return
             elif dto.batch_type == "EOF":
-                logger.info(f"Mensaje EOF recibido: {dto.transactions}. Cerrando archivo y finalizando.")
-                self._close_csv_file() 
+                logger.info(f"Mensaje EOF recibido: {dto.transactions}. Generando reporte final.")
+                self._generate_final_report()
                 self._cleanup()  
                 return
 
@@ -118,31 +122,16 @@ class ReportGenerator:
         """
         Inicializa el archivo CSV y escribe los encabezados.
         """
-        try:
-            reports_dir = './reports'
-            os.makedirs(reports_dir, exist_ok=True)
-            os.chmod(reports_dir, 0o755)
-
-            self.csv_filename = f"{reports_dir}/query1.csv"
-
-            self.csv_file = open(self.csv_filename, 'w', newline='', encoding='utf-8')
-            self.csv_writer = None
-            logger.info(f"Archivo CSV inicializado: {self.csv_filename}")
-
-        except Exception as e:
-            logger.error(f"Error inicializando el archivo CSV: {e}")
-            raise
+        # Ya no necesitamos archivo CSV local - solo enviamos al exchange
+        logger.info("ReportGenerator inicializado para envío via exchange")
 
     def _write_to_csv(self, transactions):
         """
         Escribe las transacciones en el archivo CSV, incluyendo solo las columnas necesarias.
         """
         try:
-            # Inicializar CSV writer si es necesario
-            if not self.csv_writer:
-                headers = ["transaction_id", "final_amount"]
-                self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=headers)
-                self.csv_writer.writeheader()
+            # Recopilar todas las transacciones para ordenar
+            transaction_records = []
 
             # Manejar tanto CSV raw como lista de diccionarios
             if isinstance(transactions, str):
@@ -154,21 +143,100 @@ class ReportGenerator:
                         if len(values) >= 8:  # Verificar que tiene suficientes columnas
                             transaction_id = values[0]
                             final_amount = values[7]  # final_amount está en la columna 7
-                            self.csv_writer.writerow({
+                            transaction_records.append({
                                 "transaction_id": transaction_id,
                                 "final_amount": final_amount
                             })
             else:
                 # Es lista de diccionarios
-                filtered_transactions = [
+                transaction_records = [
                     {"transaction_id": transaction["transaction_id"], "final_amount": transaction["final_amount"]}
                     for transaction in transactions
                 ]
-                self.csv_writer.writerows(filtered_transactions)
+
+            # Agregar a la lista acumulativa para ordenar al final
+            self.items_processed.extend(transaction_records)
 
         except Exception as e:
-            logger.error(f"Error escribiendo en el archivo CSV: {e}")
+            logger.error(f"Error procesando transacciones: {e}")
             raise
+
+    def _generate_final_report(self):
+        """
+        Genera el reporte final ordenado y lo envía al exchange.
+        """
+        try:
+            if not self.items_processed:
+                logger.warning("No hay datos procesados para el reporte.")
+                return
+
+            # Ordenar por transaction_id como hace pandas
+            sorted_transactions = sorted(self.items_processed, key=lambda x: x["transaction_id"])
+            
+            # Solo enviar al exchange para que el gateway lo reciba
+            # El cliente será quien guarde el reporte final
+            self._send_report_to_exchange(sorted_transactions)
+            
+            logger.info(f"Reporte final generado con {len(sorted_transactions)} transacciones")
+
+        except Exception as e:
+            logger.error(f"Error generando reporte final: {e}")
+
+    def _write_sorted_csv(self, sorted_transactions):
+        """
+        Escribe las transacciones ordenadas al archivo CSV.
+        """
+        try:
+            # Inicializar CSV writer si no existe
+            if not self.csv_writer:
+                if not hasattr(self, 'csv_file') or not self.csv_file:
+                    self._initialize_csv_file()
+                headers = ["transaction_id", "final_amount"]
+                self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=headers)
+                self.csv_writer.writeheader()
+
+            # Escribir todas las transacciones ordenadas
+            self.csv_writer.writerows(sorted_transactions)
+            self.csv_file.flush()  # Asegurar que se escriba al disco
+            
+            logger.info(f"CSV ordenado escrito: {self.csv_filename}")
+
+        except Exception as e:
+            logger.error(f"Error escribiendo CSV ordenado: {e}")
+
+    def _send_report_to_exchange(self, sorted_transactions):
+        """
+        Envía el reporte al exchange para que el gateway lo procese.
+        """
+        try:
+            # Crear middleware para el exchange
+            reports_middleware = MessageMiddlewareExchange(
+                host=self.rabbitmq_host,
+                exchange_name=self.output_exchange,
+                route_keys=[f"query.{self.query_type}"]
+            )
+            
+            # Crear mensaje del reporte
+            report_data = {
+                "query_type": self.query_type,
+                "total_records": len(sorted_transactions),
+                "transactions": sorted_transactions
+            }
+            
+            # Convertir a JSON y enviar
+            report_json = json.dumps(report_data)
+            reports_middleware.send(
+                message=report_json,
+                routing_key=f"query.{self.query_type}"
+            )
+            
+            logger.info(f"Reporte {self.query_type} enviado al exchange con {len(sorted_transactions)} registros")
+            
+            # Cerrar conexión del exchange
+            reports_middleware.close()
+
+        except Exception as e:
+            logger.error(f"Error enviando reporte al exchange: {e}")
 
     def _close_csv_file(self):
         """
