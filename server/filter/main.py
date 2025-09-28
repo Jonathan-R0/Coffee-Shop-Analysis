@@ -19,6 +19,12 @@ class FilterNode:
         
         self.filter_mode = os.getenv('FILTER_MODE', 'year')
         
+        # Variable para el total de filtros de este tipo
+        total_env_var = f'TOTAL_{self.filter_mode.upper()}_FILTERS'
+        self.total_filters = int(os.getenv(total_env_var, '1'))
+        
+        logger.info(f"Total filtros {self.filter_mode}: {self.total_filters}")
+        
         self.filter_strategy = self._create_filter_strategy()
         
         self.input_middleware = MessageMiddlewareQueue(
@@ -73,15 +79,20 @@ class FilterNode:
     def process_message(self, message: bytes):
         """
         OPTIMIZADO: Procesa CSV directo sin deserialización completa.
+        Maneja EOF con contador para sincronización entre nodos.
         """
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
 
+            # Manejo de EOF con contador
+            if dto.batch_type == "EOF":
+                return self._handle_eof_message(dto)
+            
             if dto.batch_type == "CONTROL":
                 logger.info("Señal CONTROL recibida - propagando al siguiente nodo")
                 if self.output_middleware:
                     self.output_middleware.send(message)
-                return
+                return False  # No detener consuming
             
             filtered_csv = self.filter_strategy.filter_csv_batch(dto.transactions)
             
@@ -96,9 +107,60 @@ class FilterNode:
                 
             if self.output_middleware_exchange:
                 self._send_to_exchange_by_semester(filtered_csv)
+                
+            return False  # No detener consuming para mensajes normales
 
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
+            return False  # No detener consuming en caso de error
+
+    def _handle_eof_message(self, dto: TransactionBatchDTO):
+        """
+        Maneja mensajes EOF con contador para sincronización.
+        
+        Estrategia:
+        - Si counter < total_filters: reenvía EOF:(counter+1) a INPUT queue y termina
+        - Si counter == total_filters: reenvía EOF:1 a OUTPUT queue y termina
+        """
+        try:
+            # Extraer el contador del mensaje
+            eof_data = dto.transactions.strip()
+            if ':' in eof_data:
+                counter = int(eof_data.split(':')[1])
+            else:
+                counter = 1  # Fallback si no tiene formato
+            
+            logger.info(f"EOF recibido con counter={counter}, total_filters={self.total_filters}")
+            
+            if counter < self.total_filters:
+                # Reenviar a INPUT queue con counter+1
+                new_counter = counter + 1
+                eof_dto = TransactionBatchDTO(f"EOF:{new_counter}", batch_type="EOF")
+                
+                # Enviar de vuelta a la input queue
+                input_middleware_sender = MessageMiddlewareQueue(
+                    host=self.rabbitmq_host,
+                    queue_name=self.input_queue
+                )
+                input_middleware_sender.send(eof_dto.to_bytes_fast())
+                input_middleware_sender.close()
+                
+                logger.info(f"EOF:{new_counter} reenviado a INPUT queue {self.input_queue}")
+                
+            elif counter == self.total_filters:
+                # Todos los nodos de este tipo ya procesaron - enviar EOF:1 a OUTPUT
+                if self.output_middleware:
+                    eof_dto = TransactionBatchDTO("EOF:1", batch_type="EOF")
+                    self.output_middleware.send(eof_dto.to_bytes_fast())
+                    logger.info(f"EOF:1 enviado a OUTPUT queue {self.output_q1}")
+                
+            # En ambos casos, dejar de leer de la cola
+            logger.info("Finalizando procesamiento por EOF")
+            return True  # Señal para terminar el loop de consuming
+            
+        except Exception as e:
+            logger.error(f"Error manejando EOF: {e}")
+            return False
             
     @staticmethod
     def get_month_from_csv_line(line):
@@ -150,7 +212,12 @@ class FilterNode:
         Callback para RabbitMQ cuando llega un mensaje.
         """
         try:
-            self.process_message(body)
+            should_stop = self.process_message(body)
+            if should_stop:
+                logger.info("EOF procesado - deteniendo consuming")
+                ch.stop_consuming()
+                return
+                
         except Exception as e:
             logger.error(f"Error en callback: {e}")
 

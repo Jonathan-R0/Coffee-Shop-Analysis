@@ -67,6 +67,187 @@ services:
       - FILTER_MODE=year
       - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
+      - FILTER_YEARS=2024,2025
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_2:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_2
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
+      - FILTER_YEARS=2024,2025
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_3:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_3
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
+      - FILTER_YEARS=2024,2025
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_4:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
+      - FILTER_YEARS=2024,2025
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_5:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_5
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
+      - FILTER_YEARS=2024,2025
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_6:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_6
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
+      - FILTER_YEARS=2024,2025
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_7:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_7
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
+      - FILTER_YEARS=2024,2025
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_8:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_8
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
+      - FILTER_YEARS=2024,2025
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_9:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_9
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
+      - FILTER_YEARS=2024,2025
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_10:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_10
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=10
       - FILTER_YEARS=2024,2025
     volumes:
       - ./server/config.ini:/app/config.ini
@@ -86,8 +267,188 @@ services:
       - FILTER_MODE=hour
       - INPUT_QUEUE=year_filtered
       - OUTPUT_Q1=hour_filtered
-      - OUTPUT_Q3=groupby_exchange
-      - FILTER_HOURS=06:00-23:00
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_2:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_2
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_3:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_3
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_4:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_5:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_5
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_6:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_6
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_7:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_7
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_8:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_8
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_9:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_9
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_10:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_10
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=10
+      - FILTER_HOURS=06:00-22:59
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -106,15 +467,16 @@ services:
       - FILTER_MODE=amount
       - INPUT_QUEUE=hour_filtered
       - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
       - MIN_AMOUNT=75
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  groupby_semester_1:
+  filter_amount_2:
     build:
       context: .
-      dockerfile: ./server/groupby/Dockerfile
-    container_name: groupby_semester_1
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_2
     restart: on-failure
     depends_on:
       rabbitmq:
@@ -122,17 +484,19 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - SEMESTER=1
-      - INPUT_Q3=groupby_exchange
-      - OUTPUT_QUEUE=groupby_join
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
+      - MIN_AMOUNT=75
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  groupby_semester_2:
+  filter_amount_3:
     build:
       context: .
-      dockerfile: ./server/groupby/Dockerfile
-    container_name: groupby_semester_2
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_3
     restart: on-failure
     depends_on:
       rabbitmq:
@@ -140,9 +504,151 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - SEMESTER=2
-      - INPUT_Q3=groupby_exchange
-      - OUTPUT_QUEUE=groupby_join
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount_4:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount_5:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_5
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount_6:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_6
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount_7:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_7
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount_8:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_8
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount_9:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_9
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount_10:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_10
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=final_data
+      - TOTAL_AMOUNT_FILTERS=10
+      - MIN_AMOUNT=75
     volumes:
       - ./server/config.ini:/app/config.ini
 

@@ -77,6 +77,8 @@ class TransactionBatchDTO:
         
         if decoded_data == "CONTROL:END":
             return TransactionBatchDTO([], batch_type="CONTROL")
+        elif decoded_data.startswith("EOF:"):
+            return TransactionBatchDTO(decoded_data, batch_type="EOF")
             
         return TransactionBatchDTO(decoded_data, batch_type="RAW_CSV")
 
@@ -88,6 +90,8 @@ class TransactionBatchDTO:
         """
         if self.batch_type == "CONTROL":
             return "CONTROL:END".encode('utf-8')
+        elif self.batch_type == "EOF":
+            return self.transactions.encode('utf-8')
         elif self.batch_type == "RAW_CSV":
             return self.transactions.encode('utf-8')
         else:

@@ -30,7 +30,11 @@ class Gateway:
                 logger.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
 
                 if message.action == "EXIT":
-                    logger.info("EXIT message received, closing connection")
+                    logger.info("EXIT message received, sending EOF:1 to pipeline")
+                    # Enviar EOF:1 para iniciar la secuencia de finalización sincronizada
+                    eof_dto = TransactionBatchDTO("EOF:1", batch_type="EOF")
+                    self._middleware.send(eof_dto.to_bytes_fast())
+                    logger.info("EOF:1 enviado a RabbitMQ")
                     break
                 elif message.action == "SEND":
                     if message.file_type == "D":

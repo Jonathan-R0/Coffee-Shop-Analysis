@@ -57,7 +57,7 @@ def base_services_setup(f):
         "      - ./server/config.ini:/app/config.ini\n\n"
     )
 
-def filter_service_setup(f, filter_type, instance_id, input_queue, output_queue=None):
+def filter_service_setup(f, filter_type, instance_id, input_queue, output_queue=None, total_count=None):
     """Escribe un servicio de filtro específico."""
     service_name = f"filter_{filter_type}_{instance_id}"
     
@@ -78,9 +78,13 @@ def filter_service_setup(f, filter_type, instance_id, input_queue, output_queue=
         f"      - INPUT_QUEUE={input_queue}\n"
     )
     
-    # Agregar OUTPUT_QUEUE solo si se especifica
+    # Agregar OUTPUT_Q1 solo si se especifica
     if output_queue:
-        f.write(f"      - OUTPUT_QUEUE={output_queue}\n")
+        f.write(f"      - OUTPUT_Q1={output_queue}\n")
+    
+    # Agregar variable de entorno con el total de este tipo de filtro
+    if total_count is not None:
+        f.write(f"      - TOTAL_{filter_type.upper()}_FILTERS={total_count}\n")
     
     # Configuraciones específicas por tipo de filtro
     if filter_type == 'year':
@@ -94,6 +98,7 @@ def filter_service_setup(f, filter_type, instance_id, input_queue, output_queue=
         f"    volumes:\n"
         f"      - ./server/config.ini:/app/config.ini\n\n"
     )
+
 
 def report_generator_service_setup(f, input_queue):
     """Escribe el servicio de report_generator."""
@@ -162,21 +167,21 @@ def setup_docker_compose(filename, year_count, hour_count, amount_count, include
             input_queue = queue_config['year']['input']
             output_queue = queue_config['year']['output']
             for i in range(1, year_count + 1):
-                filter_service_setup(f, 'year', i, input_queue, output_queue)
+                filter_service_setup(f, 'year', i, input_queue, output_queue, year_count)
         
         # Generar servicios de filtro hour
         if hour_count > 0:
             input_queue = queue_config['hour']['input']
             output_queue = queue_config['hour']['output']
             for i in range(1, hour_count + 1):
-                filter_service_setup(f, 'hour', i, input_queue, output_queue)
+                filter_service_setup(f, 'hour', i, input_queue, output_queue, hour_count)
         
         # Generar servicios de filtro amount
         if amount_count > 0:
             input_queue = queue_config['amount']['input']
             output_queue = queue_config['amount']['output']
             for i in range(1, amount_count + 1):
-                filter_service_setup(f, 'amount', i, input_queue, output_queue)
+                filter_service_setup(f, 'amount', i, input_queue, output_queue, amount_count)
         
         # Generar servicio de report_generator
         if include_report_generator:

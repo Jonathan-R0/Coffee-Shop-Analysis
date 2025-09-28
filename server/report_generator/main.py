@@ -31,10 +31,15 @@ class ReportGenerator:
         Procesa un batch de transacciones o una señal de control.
         """
         try:
-            dto = TransactionBatchDTO.from_bytes(message)
+            dto = TransactionBatchDTO.from_bytes_fast(message)
 
             if dto.batch_type == "CONTROL":
                 logger.info("Señal de finalización recibida. Cerrando archivo y finalizando.")
+                self._close_csv_file() 
+                self._cleanup()  
+                return
+            elif dto.batch_type == "EOF":
+                logger.info(f"Mensaje EOF recibido: {dto.transactions}. Cerrando archivo y finalizando.")
                 self._close_csv_file() 
                 self._cleanup()  
                 return
@@ -133,17 +138,33 @@ class ReportGenerator:
         Escribe las transacciones en el archivo CSV, incluyendo solo las columnas necesarias.
         """
         try:
-            filtered_transactions = [
-                {"transaction_id": transaction["transaction_id"], "final_amount": transaction["final_amount"]}
-                for transaction in transactions
-            ]
-
+            # Inicializar CSV writer si es necesario
             if not self.csv_writer:
                 headers = ["transaction_id", "final_amount"]
                 self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=headers)
                 self.csv_writer.writeheader()
 
-            self.csv_writer.writerows(filtered_transactions)
+            # Manejar tanto CSV raw como lista de diccionarios
+            if isinstance(transactions, str):
+                # Es CSV raw, procesarlo línea por línea
+                lines = transactions.strip().split('\n')
+                for line in lines:
+                    if line.strip():  # Evitar líneas vacías
+                        values = line.split(',')
+                        if len(values) >= 8:  # Verificar que tiene suficientes columnas
+                            transaction_id = values[0]
+                            final_amount = values[7]  # final_amount está en la columna 7
+                            self.csv_writer.writerow({
+                                "transaction_id": transaction_id,
+                                "final_amount": final_amount
+                            })
+            else:
+                # Es lista de diccionarios
+                filtered_transactions = [
+                    {"transaction_id": transaction["transaction_id"], "final_amount": transaction["final_amount"]}
+                    for transaction in transactions
+                ]
+                self.csv_writer.writerows(filtered_transactions)
 
         except Exception as e:
             logger.error(f"Error escribiendo en el archivo CSV: {e}")
