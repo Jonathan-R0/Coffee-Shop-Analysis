@@ -79,7 +79,6 @@ class MessageMiddlewareExchange(MessageMiddleware):
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
             
-            # Uso la primera routing key si no se especifica ninguna
             key = routing_key if routing_key else self.route_keys[0]
             
             self.channel.basic_publish(
@@ -87,10 +86,9 @@ class MessageMiddlewareExchange(MessageMiddleware):
                 routing_key=key,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=2  # Mensajes persistentes
+                    delivery_mode=1
                 )
             )
-            logger.info(f"Mensaje publicado en exchange {self.exchange_name} con routing key {key}: {message}")
         except Exception as e:
             logger.error(f"Error enviando mensaje: {e}")
             raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")
@@ -103,7 +101,6 @@ class MessageMiddlewareExchange(MessageMiddleware):
             result = self.channel.queue_declare(queue='', exclusive=True)
             self.consumer_queue = result.method.queue
             
-            # Linkeo la cola temporal a todas las routing keys
             for route_key in self.route_keys:
                 self.channel.queue_bind(
                     exchange=self.exchange_name,
@@ -111,14 +108,13 @@ class MessageMiddlewareExchange(MessageMiddleware):
                     routing_key=route_key
                 )
             
-            # Uso fair dispatch
             self.channel.basic_qos(prefetch_count=1)
             
             logger.info(f"Esperando mensajes en exchange {self.exchange_name} con routing keys {self.route_keys}...")
             self.channel.basic_consume(
                 queue=self.consumer_queue,
                 on_message_callback=self._wrap_callback(on_message_callback),
-                auto_ack=False # Ack no automático para mayor fiabilidad
+                auto_ack=False 
             )
             self.channel.start_consuming()
         except pika.exceptions.AMQPConnectionError as e:

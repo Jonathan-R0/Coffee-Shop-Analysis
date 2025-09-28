@@ -2,11 +2,10 @@ import logging
 import os
 import json
 from datetime import datetime
-from rabbitmq.middleware import MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareQueue,MessageMiddlewareExchange
 from filter_factory import FilterStrategyFactory
 from dtos.dto import TransactionBatchDTO
 
-# Reactivando logs para debug
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,8 @@ class FilterNode:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         
         self.input_queue = os.getenv('INPUT_QUEUE', 'raw_data')
-        self.output_queue = os.getenv('OUTPUT_QUEUE', None)
+        self.output_q1 = os.getenv('OUTPUT_Q1', None)
+        self.output_q3 = os.getenv('OUTPUT_Q3', None)
         
         self.filter_mode = os.getenv('FILTER_MODE', 'year')
         
@@ -27,17 +27,25 @@ class FilterNode:
         )
         
         self.output_middleware = None
-        if self.output_queue:
+        if self.output_q1:
             self.output_middleware = MessageMiddlewareQueue(
                 host=self.rabbitmq_host, 
-                queue_name=self.output_queue
+                queue_name=self.output_q1
             )
+            
+        self.output_middleware_exchange = None
+        if self.output_q3:
+            self.output_middleware_exchange = MessageMiddlewareExchange(
+                host=self.rabbitmq_host,
+                exchange_name=self.output_q3,
+                route_keys=['semester.1', 'semester.2']
+            )
+            logger.info(f"  Output Exchange: {self.output_q3}")
         
         logger.info(f"FilterNode inicializado:")
         logger.info(f"  Modo: {self.filter_mode}")
         logger.info(f"  Queue entrada: {self.input_queue}")
-        logger.info(f"  Queue salida: {self.output_queue}")
-        logger.info(f"  Usando OPTIMIZACIÓN CSV directa")
+        logger.info(f"  Queue salida: {self.output_q1}")
 
     def _create_filter_strategy(self):
         """
@@ -67,7 +75,6 @@ class FilterNode:
         OPTIMIZADO: Procesa CSV directo sin deserialización completa.
         """
         try:
-            # FAST PATH: Usar CSV directo - 50x más rápido
             dto = TransactionBatchDTO.from_bytes_fast(message)
 
             if dto.batch_type == "CONTROL":
@@ -75,30 +82,68 @@ class FilterNode:
                 if self.output_middleware:
                     self.output_middleware.send(message)
                 return
-
-            # Contar líneas de entrada
-            input_lines = len(dto.transactions.split('\n')) if dto.transactions else 0
             
-            # Filtrar CSV directo sin crear objetos Python
             filtered_csv = self.filter_strategy.filter_csv_batch(dto.transactions)
             
             if not filtered_csv.strip():
-                logger.info(f"Batch filtrado completamente - {input_lines} líneas → 0 líneas")
                 return
 
-            # Contar líneas filtradas
-            output_lines = len(filtered_csv.split('\n'))
-            logger.info(f"Batch procesado OPTIMIZADO: {input_lines} líneas → {output_lines} líneas")
-
-            # Crear DTO optimizado
             filtered_dto = TransactionBatchDTO(filtered_csv, batch_type="RAW_CSV")
             serialized_data = filtered_dto.to_bytes_fast()
 
             if self.output_middleware:
                 self.output_middleware.send(serialized_data)
+                
+            if self.output_middleware_exchange:
+                self._send_to_exchange_by_semester(filtered_csv)
 
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
+            
+    @staticmethod
+    def get_month_from_csv_line(line):
+        """Extract month from CSV line"""
+        fields = line.split(',')
+        if len(fields) >= 9:
+            date_str = fields[8]  
+            return int(date_str[5:7])
+        return None
+            
+    def _send_to_exchange_by_semester(self, csv_data: str):
+        """
+        Separa datos por semestre y envía con routing key apropiada.
+        """
+        semester_1_lines = []
+        semester_2_lines = []
+        
+        for line in csv_data.split('\n'):
+            if not line.strip():
+                continue
+            
+            month = self.get_month_from_csv_line(line)
+            if month:
+                if month <= 6:
+                    semester_1_lines.append(line)
+                else:
+                    semester_2_lines.append(line)
+        
+        # Enviar semestre 1
+        if semester_1_lines:
+            csv_s1 = '\n'.join(semester_1_lines)
+            dto_s1 = TransactionBatchDTO(csv_s1, batch_type="RAW_CSV")
+            self.output_middleware_exchange.send(
+                dto_s1.to_bytes_fast(), 
+                routing_key='semester.1'
+            )
+        
+        # Enviar semestre 2
+        if semester_2_lines:
+            csv_s2 = '\n'.join(semester_2_lines)
+            dto_s2 = TransactionBatchDTO(csv_s2, batch_type="RAW_CSV")
+            self.output_middleware_exchange.send(
+                dto_s2.to_bytes_fast(), 
+                routing_key='semester.2'
+            )
 
     def on_message_callback(self, ch, method, properties, body):
         """
