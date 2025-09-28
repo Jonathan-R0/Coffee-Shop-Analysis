@@ -190,15 +190,6 @@ class Protocol:
             logger.error(f"Error parsing message: {e}")
             return None
 
-    def parse_batch_lines(self, message: ProtocolMessage) -> List[str]:
-        """Parsea las líneas del batch desde un mensaje recibido."""
-        if not message.data.strip():
-            return []
-
-        # Dividir el contenido del mensaje en líneas
-        lines = message.data.strip().split('\n')
-        return lines
-
     # -------------------- COMMON METHODS --------------------
 
     def _receive_ack(self) -> Optional[AckResponse]:
