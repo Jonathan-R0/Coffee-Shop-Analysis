@@ -206,33 +206,47 @@ class ReportGenerator:
 
     def _send_report_to_exchange(self, sorted_transactions):
         """
-        Envía el reporte al exchange para que el gateway lo procese.
+        Envía el reporte al exchange usando DTOs en batches.
         """
         try:
             # Crear middleware para el exchange
-            reports_middleware = MessageMiddlewareExchange(
+            reports_middleware = MessageMiddlewareQueue(
                 host=self.rabbitmq_host,
-                exchange_name=self.output_exchange,
-                route_keys=[f"query.{self.query_type}"]
+                queue_name="report_queue"  # Cola específica para reportes
             )
             
-            # Crear mensaje del reporte
-            report_data = {
-                "query_type": self.query_type,
-                "total_records": len(sorted_transactions),
-                "transactions": sorted_transactions
-            }
+            # Enviar transacciones en batches usando DTO
+            batch_size = 150  # Mismo tamaño que usamos en el cliente
+            total_sent = 0
             
-            # Convertir a JSON y enviar
-            report_json = json.dumps(report_data)
-            reports_middleware.send(
-                message=report_json,
-                routing_key=f"query.{self.query_type}"
-            )
+            while total_sent < len(sorted_transactions):
+                # Crear batch
+                end_idx = min(total_sent + batch_size, len(sorted_transactions))
+                batch_transactions = sorted_transactions[total_sent:end_idx]
+                
+                # Convertir a CSV raw para enviar (solo transaction_id y final_amount)
+                csv_lines = []
+                for transaction in batch_transactions:
+                    csv_lines.append(f"{transaction['transaction_id']},{transaction['final_amount']}")
+                
+                csv_batch = '\n'.join(csv_lines)
+                
+                # Crear DTO con CSV raw
+                dto = TransactionBatchDTO(csv_batch, batch_type="RAW_CSV")
+                
+                # Enviar usando to_bytes_fast()
+                reports_middleware.send(dto.to_bytes_fast())
+                
+                total_sent = end_idx
+                logger.info(f"Batch enviado: {len(batch_transactions)} transacciones ({total_sent}/{len(sorted_transactions)})")
             
-            logger.info(f"Reporte {self.query_type} enviado al exchange con {len(sorted_transactions)} registros")
+            # Enviar EOF para indicar fin del reporte
+            eof_dto = TransactionBatchDTO("EOF:REPORT", batch_type="EOF")
+            reports_middleware.send(eof_dto.to_bytes_fast())
             
-            # Cerrar conexión del exchange
+            logger.info(f"Reporte {self.query_type} enviado en batches: {len(sorted_transactions)} registros totales")
+            
+            # Cerrar conexión
             reports_middleware.close()
 
         except Exception as e:

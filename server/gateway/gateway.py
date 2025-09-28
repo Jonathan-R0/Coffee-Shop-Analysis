@@ -4,7 +4,6 @@ import os
 import json
 import signal
 import sys
-import threading
 from common.protocol import Protocol, ProtocolMessage
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dataclasses import asdict
@@ -21,9 +20,6 @@ class Gateway:
         self._is_running = False
         self._middleware = MessageMiddlewareQueue(host=rabbitmq_host, queue_name=output_queue)
         self._reports_exchange = reports_exchange
-        self._pending_reports = {}  # Para almacenar reportes pendientes por query_id
-        self._report_received = threading.Event()  # Para sincronizar la espera del reporte
-        self._latest_report = None  # Para almacenar el último reporte recibido
 
     def handle_connection(self, client_sock):
         """Maneja una conexión entrante."""
@@ -84,73 +80,68 @@ class Gateway:
         try:
             logger.info("Esperando reporte del pipeline...")
             
-            # Iniciar listener del exchange en un hilo separado
-            if self._reports_exchange:
-                report_thread = threading.Thread(target=self._start_report_listener)
-                report_thread.daemon = True
-                report_thread.start()
-                
-                # Esperar hasta 30 segundos por el reporte
-                if self._report_received.wait(timeout=30):
-                    if self._latest_report:
-                        # Convertir el reporte JSON a CSV para el cliente
-                        csv_content = self._convert_report_to_csv(self._latest_report)
-                        
-                        # Enviar reporte al cliente usando el protocolo correcto
-                        self._send_report_via_protocol(protocol, csv_content)
-                        logger.info(f"Reporte enviado al cliente: {len(csv_content)} bytes")
-                    else:
-                        logger.warning("Reporte recibido pero está vacío")
-                        self._send_error_to_client(protocol, "Empty report received")
-                else:
-                    logger.warning("Timeout esperando reporte")
-                    self._send_error_to_client(protocol, "Timeout waiting for report")
-            else:
-                logger.error("Exchange de reportes no configurado")
-                self._send_error_to_client(protocol, "Reports exchange not configured")
-                
-        except Exception as e:
-            logger.error(f"Error enviando reporte: {e}")
-            self._send_error_to_client(protocol, f"Error processing report: {e}")
-
-    def _start_report_listener(self):
-        """
-        Escucha reportes del exchange en un hilo separado.
-        """
-        try:
-            reports_middleware = MessageMiddlewareExchange(
+            # Crear middleware para recibir reportes
+            report_middleware = MessageMiddlewareQueue(
                 host=self._middleware.host,
-                exchange_name=self._reports_exchange,
-                route_keys=["query.*"]  # Escuchar todas las queries
+                queue_name="report_queue"
             )
+            
+            # Recibir batches del reporte
+            report_transactions = []
             
             def report_callback(ch, method, properties, body):
                 try:
-                    report_data = json.loads(body.decode('utf-8'))
-                    self._latest_report = report_data
-                    self._report_received.set()  # Señalar que llegó el reporte
-                    logger.info(f"Reporte recibido: {report_data['query_type']} con {report_data['total_records']} registros")
+                    # Usar DTO para procesar el mensaje
+                    dto = TransactionBatchDTO.from_bytes_fast(body)
                     
-                    # Detener el consumo después de recibir el primer reporte
-                    reports_middleware.stop_consuming()
+                    if dto.batch_type == "EOF":
+                        logger.info("EOF del reporte recibido")
+                        # Detener consumo cuando recibimos EOF
+                        report_middleware.stop_consuming()
+                        return
+                    elif dto.batch_type == "DATA":  
+                        # Agregar transacciones del batch
+                        report_transactions.extend(dto.transactions)
+                        logger.info(f"Batch del reporte recibido: {len(dto.transactions)} transacciones")
+                    elif dto.batch_type == "RAW_CSV":
+                        # Procesar CSV raw del reporte (ya viene con transaction_id,final_amount)
+                        lines = dto.transactions.strip().split('\n')
+                        for line in lines:
+                            if line.strip():
+                                values = line.split(',')
+                                if len(values) >= 2:
+                                    report_transactions.append({
+                                        "transaction_id": values[0],
+                                        "final_amount": values[1]
+                                    })
+                        logger.info(f"Batch CSV del reporte procesado: {len(lines)} líneas")
+                    
                 except Exception as e:
-                    logger.error(f"Error procesando reporte: {e}")
+                    logger.error(f"Error procesando batch del reporte: {e}")
             
-            # Consumir un solo mensaje
-            reports_middleware.start_consuming(report_callback)
-            reports_middleware.close()
+            # Consumir batches hasta recibir EOF
+            report_middleware.start_consuming(report_callback)
             
+            # Una vez que terminamos, convertir y enviar al cliente
+            if report_transactions:
+                csv_content = self._convert_transactions_to_csv(report_transactions)
+                self._send_report_via_protocol(protocol, csv_content)
+                logger.info(f"Reporte enviado al cliente: {len(report_transactions)} transacciones")
+            else:
+                logger.warning("No se recibieron transacciones del reporte")
+                self._send_error_to_client(protocol, "No report data received")
+                
+            report_middleware.close()
+                
         except Exception as e:
-            logger.error(f"Error escuchando reportes: {e}")
-            self._report_received.set()  # Señalar para evitar timeout infinito
+            logger.error(f"Error esperando reporte: {e}")
+            self._send_error_to_client(protocol, f"Error processing report: {e}")
 
-    def _convert_report_to_csv(self, report_data):
+    def _convert_transactions_to_csv(self, transactions):
         """
-        Convierte el reporte JSON a formato CSV.
+        Convierte lista de transacciones a formato CSV.
         """
         try:
-            transactions = report_data.get('transactions', [])
-            
             # Crear CSV
             csv_lines = ["transaction_id,final_amount"]
             for transaction in transactions:
@@ -158,7 +149,7 @@ class Gateway:
             
             return '\n'.join(csv_lines)
         except Exception as e:
-            logger.error(f"Error convirtiendo reporte a CSV: {e}")
+            logger.error(f"Error convirtiendo transacciones a CSV: {e}")
             return "transaction_id,final_amount\nERROR,0"
 
     def _send_report_via_protocol(self, protocol, csv_content):
