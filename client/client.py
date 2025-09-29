@@ -129,21 +129,17 @@ class Client:
                         self._save_report(report_content, reports_dir)
                     break
                 
-                logger.info(f"Response.action: {response.action}, Response.data length: {len(response.data) if response.data else 0}")
+                logger.info(f"Respuesta recibida: {response}")
                 
                 if response.action == "RPRT":
                     batch_count += 1
-                    logger.info(f"Recibido batch {batch_count} del reporte: {len(response.data)} bytes")
                     
                     # Agregar el contenido del batch
                     if response.data:
                         report_content.append(response.data)
-                        logger.info(f"Agregado batch {batch_count} al reporte. Total batches: {len(report_content)}")
                     
                     # Enviar ACK al servidor
-                    logger.info(f"Enviando ACK para batch {batch_count}...")
                     self.protocol._send_ack(batch_count, 0)  # 0 = Success
-                    logger.info(f"ACK enviado para batch {batch_count}")
                         
                 elif response.action == "EOF":
                     logger.info(f"EOF recibido. Total batches: {batch_count}")
