@@ -292,6 +292,7 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       - INPUT_EXCHANGE=report.exchange
+      - REPORTS_EXCHANGE=reports_exchange
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./reports:/app/reports

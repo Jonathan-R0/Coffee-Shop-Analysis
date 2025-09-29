@@ -1,9 +1,8 @@
 import logging
 import os
-from datetime import datetime
 
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
-from dtos.dto import TransactionBatchDTO, BatchType
+from dtos.dto import TransactionBatchDTO
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -11,92 +10,172 @@ logger = logging.getLogger(__name__)
 class ReportGenerator:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
-        self.input_queue = os.getenv('INPUT_QUEUE', 'final_data')
-        self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'reports_exchange')
-        self.query_type = os.getenv('QUERY_TYPE', 'query1')
         self.report_exchange = os.getenv('REPORT_EXCHANGE', 'report.exchange')
-
+        self.join_exchange = os.getenv('INPUT_EXCHANGE', 'report.join.exchange')
         
+        # Conexión para recibir datos
         self.input_middleware = MessageMiddlewareExchange(
+            host=self.rabbitmq_host,
+            exchange_name=self.join_exchange,
+            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof']
+        )
+        self.report_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.report_exchange,
             route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof']
         )
         
-        self.csv_files = {}  # Para múltiples archivos
-        self.eof_received = set()  # Tracking de EOF
+        # Acumuladores en memoria (listas de strings CSV)
+        self.q1_lines = []  # Cada elemento es una línea: "transaction_id,final_amount"
+        self.q3_lines = []  # Cada elemento es una línea: "year_half_created_at,store_name,tpv"
         
-        logger.info(f"ReportGenerator inicializado:")
-        logger.info(f"  Queue entrada: {self.input_queue}")
-        logger.info(f"  Exchange salida: {self.output_exchange}")
-        logger.info(f"  Tipo de query: {self.query_type}")
+        # Tracking de EOF
+        self.eof_received = set()
+        
+        logger.info(f"ReportGenerator inicializado")
         logger.info(f"  Exchange: {self.report_exchange}")
+        logger.info(f"  RabbitMQ Host: {self.rabbitmq_host}")
 
     def process_message(self, message: bytes, routing_key: str):
+        """Procesa mensajes según el routing key"""
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
-
-            if dto.batch_type == "CONTROL":
-                logger.info("Señal de finalización recibida. Cerrando archivo y finalizando.")
-                self._close_csv_file() 
-                self._cleanup()  
-                return
-            elif dto.batch_type == "EOF":
-                logger.info(f"Mensaje EOF recibido: {dto.transactions}. Generando reporte final.")
-                self._generate_final_report()
-                self._cleanup()  
-                return
-
-            self._write_to_csv(dto.transactions)
-        
-        except Exception as e:
-            logger.error(f"Error procesando mensaje: {e}. Mensaje recibido: {message}")
-
-    def save_report_to_file(self):
-        """
-        Guarda el reporte en un archivo CSV.
-        """
-        try:
-            if not self.items_processed:
-                logger.warning("No hay datos procesados para guardar en el reporte.")
-                return
-
-            headers = self.items_processed[0].keys()
-
-            reports_dir = './reports'  
-            os.makedirs(reports_dir, exist_ok=True)
-            os.chmod(reports_dir, 0o755)  
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{reports_dir}/coffee_shop_report_{timestamp}.csv"
-
-            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=headers)
-                writer.writeheader()  
-                writer.writerows(self.items_processed)  
-
-            os.chmod(filename, 0o644)
-
-            logger.info(f"Reporte CSV guardado en: {filename}")
-
+            
+            # Determinar query desde routing key
+            if routing_key.startswith('q1'):
+                query_name = 'q1'
+            elif routing_key.startswith('q3'):
+                query_name = 'q3'
+            else:
+                logger.warning(f"Routing key desconocido: {routing_key}")
+                return False
+            
+            # Manejar EOF
+            if routing_key.endswith('.eof'):
+                logger.info(f"EOF recibido para {query_name}")
+                self.eof_received.add(query_name)
+                
+                # Generar y enviar reporte para esta query
+                self._generate_and_send_report(query_name)
+                
+                # Si ya recibimos ambos EOF, terminar
+                if len(self.eof_received) >= 2:
+                    logger.info("Todos los reportes generados - finalizando")
+                    return True
+                    
+                return False
+            
+            # Procesar datos (.data)
+            if routing_key.endswith('.data'):
+                self._accumulate_data(dto.data, query_name)
+            
+            return False
+            
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
 
-    def on_message_callback(self, ch, method, properties, body):
-        """Callback para RabbitMQ cuando llega un mensaje."""
+    def _accumulate_data(self, csv_data: str, query_name: str):
+        """Acumula líneas CSV en memoria"""
         try:
-            routing_key = method.routing_key  # ✅ Obtener routing key
-            should_stop = self.process_message(body, routing_key)  # ✅ Pasar routing key
+            lines = csv_data.strip().split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Saltar headers
+                if 'transaction_id' in line or 'year_half_created_at' in line or 'store_name' in line:
+                    continue
+                
+                # Acumular en la lista correspondiente
+                if query_name == 'q1':
+                    self.q1_lines.append(line)
+                elif query_name == 'q3':
+                    self.q3_lines.append(line)
+                        
+        except Exception as e:
+            logger.error(f"Error acumulando datos para {query_name}: {e}")
+            raise
+
+    def _generate_and_send_report(self, query_name: str):
+        """Genera el reporte final y lo envía al gateway"""
+        try:
+            if query_name == 'q1':
+                lines = self.q1_lines
+                # Q1: Ordenar por transaction_id (primera columna)
+                sorted_lines = sorted(lines, key=lambda x: x.split(',')[0])
+                logger.info(f"Q1: {len(sorted_lines)} transacciones ordenadas por transaction_id")
+            else:  # q3
+                # Q3: No ordenar, enviar tal cual
+                sorted_lines = self.q3_lines
+                logger.info(f"Q3: {len(sorted_lines)} registros (sin ordenar)")
+            
+            if not sorted_lines:
+                logger.warning(f"No hay datos para {query_name}")
+                return
+            
+            # Enviar al gateway
+            self._send_report_to_gateway(sorted_lines, query_name)
+            
+        except Exception as e:
+            logger.error(f"Error generando reporte para {query_name}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    def _send_report_to_gateway(self, lines, query_name: str):
+        """Envía el reporte al gateway usando exchange con routing keys"""
+        try:
+            
+            batch_size = 150
+            total_sent = 0
+            
+            logger.info(f"{query_name}: Enviando {len(lines)} líneas al gateway")
+            
+            # Enviar líneas en batches con routing key específico
+            while total_sent < len(lines):
+                end_idx = min(total_sent + batch_size, len(lines))
+                batch_lines = lines[total_sent:end_idx]
+                
+                csv_batch = '\n'.join(batch_lines)
+                dto = TransactionBatchDTO(csv_batch, batch_type="RAW_CSV")
+                
+                # Enviar con routing key específico de la query
+                self.report_middleware.send(dto.to_bytes_fast(), routing_key=f'{query_name}.data')
+                
+                total_sent = end_idx
+                logger.info(f"{query_name}: Batch enviado {total_sent}/{len(lines)}")
+            
+            # Enviar EOF con routing key específico
+            eof_dto = TransactionBatchDTO(f"EOF:{query_name.upper()}", batch_type="EOF")
+            self.report_middleware.send(eof_dto.to_bytes_fast(), routing_key=f'{query_name}.eof')
+            
+            logger.info(f"{query_name}: Reporte enviado completo: {len(lines)} registros")
+            self.report_middleware.close()
+
+        except Exception as e:
+            logger.error(f"Error enviando reporte {query_name}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    def on_message_callback(self, ch, method, properties, body):
+        """Callback de RabbitMQ"""
+        try:
+            routing_key = method.routing_key
+            should_stop = self.process_message(body, routing_key)
             
             if should_stop:
-                logger.info("Todos los reportes generados - deteniendo consuming")
+                logger.info("Deteniendo consuming")
                 ch.stop_consuming()
+                
         except Exception as e:
-            logger.error(f"Error en el callback de mensaje: {e}")
+            logger.error(f"Error en callback: {e}")
 
     def start(self):
-        """Inicia el ReportGenerator."""
+        """Inicia el ReportGenerator"""
         logger.info("Iniciando ReportGenerator...")
         
         try:
@@ -109,155 +188,13 @@ class ReportGenerator:
             self._cleanup()
 
     def _cleanup(self):
+        """Limpieza de recursos"""
         try:
-            # Cerrar cualquier archivo CSV abierto
-            for query_name in list(self.csv_files.keys()):
-                self._close_csv_file(query_name)
-            
             if self.input_middleware:
                 self.input_middleware.close()
                 logger.info("Conexión cerrada")
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
-
-
-
-    def _write_to_csv(self, csv_data: str, query_name: str):
-        """Escribe datos al archivo CSV correspondiente."""
-        try:
-            # Recopilar todas las transacciones para ordenar
-            transaction_records = []
-
-            # Manejar tanto CSV raw como lista de diccionarios
-            if isinstance(transactions, str):
-                # Es CSV raw, procesarlo línea por línea
-                lines = transactions.strip().split('\n')
-                for line in lines:
-                    if line.strip():  # Evitar líneas vacías
-                        values = line.split(',')
-                        if len(values) >= 8:  # Verificar que tiene suficientes columnas
-                            transaction_id = values[0]
-                            final_amount = values[7]  # final_amount está en la columna 7
-                            transaction_records.append({
-                                "transaction_id": transaction_id,
-                                "final_amount": final_amount
-                            })
-            else:
-                # Es lista de diccionarios
-                transaction_records = [
-                    {"transaction_id": transaction["transaction_id"], "final_amount": transaction["final_amount"]}
-                    for transaction in transactions
-                ]
-
-            # Agregar a la lista acumulativa para ordenar al final
-            self.items_processed.extend(transaction_records)
-
-        except Exception as e:
-            logger.error(f"Error procesando transacciones: {e}")
-            raise
-
-    def _generate_final_report(self):
-        """
-        Genera el reporte final ordenado y lo envía al exchange.
-        """
-        try:
-            if not self.items_processed:
-                logger.warning("No hay datos procesados para el reporte.")
-                return
-
-            # Ordenar por transaction_id como hace pandas
-            sorted_transactions = sorted(self.items_processed, key=lambda x: x["transaction_id"])
-            
-            # Solo enviar al exchange para que el gateway lo reciba
-            # El cliente será quien guarde el reporte final
-            self._send_report_to_exchange(sorted_transactions)
-            
-            logger.info(f"Reporte final generado con {len(sorted_transactions)} transacciones")
-
-        except Exception as e:
-            logger.error(f"Error generando reporte final: {e}")
-
-    def _write_sorted_csv(self, sorted_transactions):
-        """
-        Escribe las transacciones ordenadas al archivo CSV.
-        """
-        try:
-            # Inicializar CSV writer si no existe
-            if not self.csv_writer:
-                if not hasattr(self, 'csv_file') or not self.csv_file:
-                    self._initialize_csv_file()
-                headers = ["transaction_id", "final_amount"]
-                self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=headers)
-                self.csv_writer.writeheader()
-
-            # Escribir todas las transacciones ordenadas
-            self.csv_writer.writerows(sorted_transactions)
-            self.csv_file.flush()  # Asegurar que se escriba al disco
-            
-            logger.info(f"CSV ordenado escrito: {self.csv_filename}")
-
-        except Exception as e:
-            logger.error(f"Error escribiendo CSV ordenado: {e}")
-
-    def _send_report_to_exchange(self, sorted_transactions):
-        """
-        Envía el reporte al exchange usando DTOs en batches.
-        """
-        try:
-            # Crear middleware para el exchange
-            reports_middleware = MessageMiddlewareQueue(
-                host=self.rabbitmq_host,
-                queue_name="report_queue"  # Cola específica para reportes
-            )
-            
-            # Enviar transacciones en batches usando DTO
-            batch_size = 150  # Mismo tamaño que usamos en el cliente
-            total_sent = 0
-            
-            while total_sent < len(sorted_transactions):
-                # Crear batch
-                end_idx = min(total_sent + batch_size, len(sorted_transactions))
-                batch_transactions = sorted_transactions[total_sent:end_idx]
-                
-                # Convertir a CSV raw para enviar (solo transaction_id y final_amount)
-                csv_lines = []
-                for transaction in batch_transactions:
-                    csv_lines.append(f"{transaction['transaction_id']},{transaction['final_amount']}")
-                
-                csv_batch = '\n'.join(csv_lines)
-                
-                # Crear DTO con CSV raw
-                dto = TransactionBatchDTO(csv_batch, batch_type="RAW_CSV")
-                
-                # Enviar usando to_bytes_fast()
-                reports_middleware.send(dto.to_bytes_fast())
-                
-                total_sent = end_idx
-                logger.info(f"Batch enviado: {len(batch_transactions)} transacciones ({total_sent}/{len(sorted_transactions)})")
-            
-            # Enviar EOF para indicar fin del reporte
-            eof_dto = TransactionBatchDTO("EOF:REPORT", batch_type="EOF")
-            reports_middleware.send(eof_dto.to_bytes_fast())
-            
-            logger.info(f"Reporte {self.query_type} enviado en batches: {len(sorted_transactions)} registros totales")
-            
-            # Cerrar conexión
-            reports_middleware.close()
-
-        except Exception as e:
-            logger.error(f"Error enviando reporte al exchange: {e}")
-
-    def _close_csv_file(self):
-        """
-        Cierra el archivo CSV si está abierto.
-        """
-        try:
-            if query_name in self.csv_files:
-                self.csv_files[query_name].close()
-                logger.info(f"Archivo CSV cerrado para {query_name}")
-                del self.csv_files[query_name]
-        except Exception as e:
-            logger.error(f"Error cerrando el archivo CSV para {query_name}: {e}")
 
 
 if __name__ == "__main__":
