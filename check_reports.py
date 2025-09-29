@@ -4,7 +4,7 @@ import os
 
 # Filename Importing
 
-transactions_files = [f for f in os.listdir('./data/transactions') if f.startswith('transactions_') and f.endswith('.csv')]
+transactions_files = [f for f in os.listdir('./data/transactions') if f.startswith('transactions_') and f.endswith('.csv') and ('2024' in f or '2025' in f)]
 transactions_items_files_2024 = [f for f in os.listdir('./data/transaction_items') if f.startswith('transaction_items_') and f.endswith('.csv') and '2024' in f]
 transactions_items_files_2025 = [f for f in os.listdir('./data/transaction_items') if f.startswith('transaction_items_') and f.endswith('.csv') and '2025' in f]
 users_files = [f for f in os.listdir('./data/users') if f.startswith('users_') and f.endswith('.csv')]
