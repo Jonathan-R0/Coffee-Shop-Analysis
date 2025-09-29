@@ -7,22 +7,33 @@ import sys
 import os
 from unittest.mock import patch
 
-# Add the project root to the path
-project_root = os.path.join(os.path.dirname(__file__), '..', '..', '..')
-sys.path.insert(0, project_root)
+# Add the project root to the path so we can import from the rabbitmq module
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-# Import the middleware module
-middleware_path = os.path.join(project_root, 'rabbitmq')
-sys.path.insert(0, middleware_path)
-
-from middleware import (
-    MessageMiddlewareQueue,
-    MessageMiddlewareExchange,
-    MessageMiddlewareMessageError,
-    MessageMiddlewareDisconnectedError,
-    MessageMiddlewareCloseError,
-    MessageMiddlewareDeleteError
-)
+# Now import from the rabbitmq package
+try:
+    from rabbitmq.middleware import (
+        MessageMiddlewareQueue,
+        MessageMiddlewareExchange,
+        MessageMiddlewareMessageError,
+        MessageMiddlewareDisconnectedError,
+        MessageMiddlewareCloseError,
+        MessageMiddlewareDeleteError
+    )
+except ImportError:
+    # Fallback for when running from the test directory
+    middleware_path = os.path.join(project_root, 'rabbitmq')
+    sys.path.insert(0, middleware_path)
+    from middleware import (
+        MessageMiddlewareQueue,
+        MessageMiddlewareExchange,
+        MessageMiddlewareMessageError,
+        MessageMiddlewareDisconnectedError,
+        MessageMiddlewareCloseError,
+        MessageMiddlewareDeleteError
+    )
 
 
 class TestMessageMiddlewareIntegration(unittest.TestCase):
@@ -54,7 +65,7 @@ class TestMessageMiddlewareIntegration(unittest.TestCase):
             self.received_messages.put(message)
         return callback
 
-    @patch('middleware.pika.BlockingConnection')
+    @patch('rabbitmq.middleware.pika.BlockingConnection')
     def test_working_queue_1_to_1_communication(self, mock_blocking_connection):
         """Test 1:1 communication using working queue pattern"""
         # Setup mocks
@@ -111,7 +122,7 @@ class TestMessageMiddlewareIntegration(unittest.TestCase):
         producer.close()
         consumer.close()
 
-    @patch('middleware.pika.BlockingConnection')
+    @patch('rabbitmq.middleware.pika.BlockingConnection')
     def test_working_queue_1_to_n_communication(self, mock_blocking_connection):
         """Test 1:N communication using working queue pattern (load balancing)"""
         # Setup mocks
@@ -193,7 +204,7 @@ class TestMessageMiddlewareIntegration(unittest.TestCase):
             consumer.close()
         producer.close()
 
-    @patch('middleware.pika.BlockingConnection')
+    @patch('rabbitmq.middleware.pika.BlockingConnection')
     def test_exchange_1_to_1_communication(self, mock_blocking_connection):
         """Test 1:1 communication using exchange pattern"""
         # Setup mocks
@@ -255,7 +266,7 @@ class TestMessageMiddlewareIntegration(unittest.TestCase):
         producer.close()
         consumer.close()
 
-    @patch('middleware.pika.BlockingConnection')
+    @patch('rabbitmq.middleware.pika.BlockingConnection')
     def test_exchange_1_to_n_communication(self, mock_blocking_connection):
         """Test 1:N communication using exchange pattern (pub/sub)"""
         # Setup mocks
@@ -344,7 +355,7 @@ class TestMessageMiddlewareIntegration(unittest.TestCase):
             consumer.close()
         producer.close()
 
-    @patch('middleware.pika.BlockingConnection')
+    @patch('rabbitmq.middleware.pika.BlockingConnection')
     def test_exchange_multiple_routing_keys(self, mock_blocking_connection):
         """Test exchange with multiple routing keys"""
         # Setup mocks
