@@ -2,10 +2,6 @@ import pytest
 import sys
 import os
 
-# Configuration for pytest
-pytest_plugins = []
-
-# Add the project root to the path for imports
 project_root = os.path.join(os.path.dirname(__file__), '..', '..', '..')
 sys.path.insert(0, project_root)
 

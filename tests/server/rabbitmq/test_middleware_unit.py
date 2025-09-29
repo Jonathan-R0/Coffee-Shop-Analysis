@@ -4,12 +4,10 @@ import pika
 import sys
 import os
 
-# Add the project root to the path so we can import from the rabbitmq module
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Now import from the rabbitmq package
 try:
     from rabbitmq.middleware import (
         MessageMiddlewareQueue,
@@ -20,7 +18,6 @@ try:
         MessageMiddlewareDeleteError
     )
 except ImportError:
-    # Fallback for when running from the test directory
     middleware_path = os.path.join(project_root, 'rabbitmq')
     sys.path.insert(0, middleware_path)
     from middleware import (

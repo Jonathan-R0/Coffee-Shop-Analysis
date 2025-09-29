@@ -7,32 +7,21 @@ import sys
 import os
 from unittest.mock import patch
 
-# Add the project root to the path so we can import from the rabbitmq module
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Now import from the rabbitmq package
 try:
     from rabbitmq.middleware import (
         MessageMiddlewareQueue,
         MessageMiddlewareExchange,
-        MessageMiddlewareMessageError,
-        MessageMiddlewareDisconnectedError,
-        MessageMiddlewareCloseError,
-        MessageMiddlewareDeleteError
     )
 except ImportError:
-    # Fallback for when running from the test directory
     middleware_path = os.path.join(project_root, 'rabbitmq')
     sys.path.insert(0, middleware_path)
     from middleware import (
         MessageMiddlewareQueue,
         MessageMiddlewareExchange,
-        MessageMiddlewareMessageError,
-        MessageMiddlewareDisconnectedError,
-        MessageMiddlewareCloseError,
-        MessageMiddlewareDeleteError
     )
 
 
@@ -47,7 +36,6 @@ class TestMessageMiddlewareIntegration(unittest.TestCase):
         
     def tearDown(self):
         """Clean up after each test method."""
-        # Clear the received messages queue
         while not self.received_messages.empty():
             try:
                 self.received_messages.get_nowait()
