@@ -36,10 +36,10 @@ class Client:
         """Procesa y envía archivos desde las carpetas montadas como volúmenes."""
         mounted_folders = {
             "D": "/data/transactions",
-            #"D": "/data/transactions",
+            #"D": "/data/transactions_test",
             #"D": "/data/transaction_items",
             #"users": "/data/users",
-            #"stores": "/data/stores",
+            "S": "/data/stores",
             #"menu_items": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
             #"vouchers": "/data/vouchers"
@@ -61,6 +61,7 @@ class Client:
                 for file in files:
                     file_path = os.path.join(folder_path, file)
                     self.send_data(file_path, file_type)
+                self.protocol.send_finish_message(file_type)
             
             if self.protocol:
                 self.protocol.send_exit_message()

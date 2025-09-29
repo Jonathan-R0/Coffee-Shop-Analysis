@@ -269,3 +269,36 @@ class Protocol:
             logger.info("Conexión cerrada")
         except Exception as e:
             logger.error(f"Error cerrando conexión: {e}")
+            
+
+
+    def send_finish_message(self, file_type: str) -> bool:
+        """
+        Envía un mensaje FINISH indicando que terminó de procesar todos los archivos de un tipo.
+        """
+        try:
+            message = bytearray()
+            
+            # ACTION (4 bytes)
+            action = "FINI"  # Nuevo action type
+            message.extend(action.ljust(4, '\x00').encode('utf-8'))
+            
+            # FILE-TYPE (1 byte)
+            message.extend(file_type.encode('utf-8'))
+            
+            # SIZE (4 bytes) - 0 
+            message.extend(struct.pack('>I', 0))
+            
+            # LAST-BATCH (1 byte) - true
+            message.extend(struct.pack('B', 1))
+            
+            success = self._send_all(bytes(message))
+            
+            if success:
+                logger.info(f"Mensaje FINISH enviado para file_type: {file_type}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error enviando FINISH: {e}")
+            return False

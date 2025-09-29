@@ -91,10 +91,37 @@ def filter_service_setup(f, filter_type, instance_id, input_queue, output_queue=
         f.write("      - FILTER_YEARS=2024,2025\n")
     elif filter_type == 'hour':
         f.write("      - FILTER_HOURS=06:00-22:59\n")
+        # Los filtros hour son donde se ramifica: query 1 (amount) y query 3 (groupby)
+        f.write("      - OUTPUT_Q3=groupby.join.exchange\n")
     elif filter_type == 'amount':
         f.write("      - MIN_AMOUNT=75\n")
     
     f.write(
+        f"    volumes:\n"
+        f"      - ./server/config.ini:/app/config.ini\n\n"
+    )
+
+
+def groupby_service_setup(f, semester):
+    """Escribe un servicio de groupby específico para un semestre."""
+    service_name = f"groupby_semester_{semester}"
+    
+    f.write(
+        f"  {service_name}:\n"
+        f"    build:\n"
+        f"      context: .\n"
+        f"      dockerfile: ./server/groupby/Dockerfile\n"
+        f"    container_name: {service_name}\n"
+        f"    restart: on-failure\n"
+        f"    depends_on:\n"
+        f"      rabbitmq:\n"
+        f"        condition: service_healthy\n"
+        f"    environment:\n"
+        f"      - PYTHONUNBUFFERED=1\n"
+        f"      - RABBITMQ_HOST=rabbitmq\n"
+        f"      - SEMESTER={semester}\n"
+        f"      - INPUT_Q3=groupby.join.exchange\n"
+        f"      - TOTAL_GROUPBY_NODES=2\n"
         f"    volumes:\n"
         f"      - ./server/config.ini:/app/config.ini\n\n"
     )
@@ -175,6 +202,11 @@ def setup_docker_compose(filename, year_count, hour_count, amount_count, include
             output_queue = queue_config['hour']['output']
             for i in range(1, hour_count + 1):
                 filter_service_setup(f, 'hour', i, input_queue, output_queue, hour_count)
+            
+            # Agregar servicios groupby para query 3 cuando hay filtros hour (punto de ramificación)
+            # Siempre exactamente 2 nodos: semester 1 y semester 2
+            groupby_service_setup(f, 1)  # Semester 1
+            groupby_service_setup(f, 2)  # Semester 2
         
         # Generar servicios de filtro amount
         if amount_count > 0:
@@ -191,10 +223,6 @@ def setup_docker_compose(filename, year_count, hour_count, amount_count, include
 def main():
     if len(sys.argv) < 5 or len(sys.argv) > 6:
         print("Uso: python configure_nodes.py <nombre_archivo> <cant_year> <cant_hour> <cant_amount> [include_report_generator]")
-        print("Ejemplos:")
-        print("  python configure_nodes.py docker-compose.yaml 1 1 1        # Con report_generator (por defecto)")
-        print("  python configure_nodes.py docker-compose.yaml 1 1 1 true   # Con report_generator")
-        print("  python configure_nodes.py docker-compose.yaml 1 1 1 false  # Sin report_generator")
         sys.exit(1)
 
     nombre_archivo = sys.argv[1]
@@ -208,12 +236,13 @@ def main():
         include_report_generator = sys.argv[5].lower() not in ['false', '0', 'no']
 
     setup_docker_compose(nombre_archivo, cant_year, cant_hour, cant_amount, include_report_generator)
-    print(f"✅ Archivo '{nombre_archivo}' generado exitosamente!")
-    print(f"📊 Filtros year: {cant_year}, hour: {cant_hour}, amount: {cant_amount}")
+    print(f"Archivo '{nombre_archivo}' generado exitosamente!")
+    print(f"Filtros year: {cant_year}, hour: {cant_hour}, amount: {cant_amount}")
+    print(f"GroupBy nodes: 2 (semester 1 y semester 2)")
     if include_report_generator:
-        print("📈 Report generator: incluido")
+        print("Report generator: incluido")
     else:
-        print("📈 Report generator: no incluido")
+        print("Report generator: no incluido")
 
 if __name__ == "__main__":
     main()

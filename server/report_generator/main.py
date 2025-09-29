@@ -1,10 +1,8 @@
 import logging
 import os
-import json
-import csv
 from datetime import datetime
-from rabbitmq.middleware import MessageMiddlewareQueue
-from dtos.dto import TransactionBatchDTO
+from rabbitmq.middleware import MessageMiddlewareExchange
+from dtos.dto import TransactionBatchDTO, BatchType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -12,175 +10,143 @@ logger = logging.getLogger(__name__)
 class ReportGenerator:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
-        self.input_queue = os.getenv('INPUT_QUEUE', 'final_data')
+        self.report_exchange = os.getenv('REPORT_EXCHANGE', 'report.exchange')
         
-        self.input_middleware = MessageMiddlewareQueue(
-            host=self.rabbitmq_host, 
-            queue_name=self.input_queue
+        self.input_middleware = MessageMiddlewareExchange(
+            host=self.rabbitmq_host,
+            exchange_name=self.report_exchange,
+            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof']
         )
         
-        self.items_processed = []
-        self.csv_file = None
-        self.csv_writer = None
+        self.csv_files = {}  # Para múltiples archivos
+        self.eof_received = set()  # Tracking de EOF
         
         logger.info(f"ReportGenerator inicializado:")
-        logger.info(f"  Queue entrada: {self.input_queue}")
+        logger.info(f"  Exchange: {self.report_exchange}")
 
-    def process_message(self, message: bytes):
-        """
-        Procesa un batch de transacciones o una señal de control.
-        """
+    def process_message(self, message: bytes, routing_key: str):
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
-
-            if dto.batch_type == "CONTROL":
-                logger.info("Señal de finalización recibida. Cerrando archivo y finalizando.")
-                self._close_csv_file() 
-                self._cleanup()  
-                return
-            elif dto.batch_type == "EOF":
-                logger.info(f"Mensaje EOF recibido: {dto.transactions}. Cerrando archivo y finalizando.")
-                self._close_csv_file() 
-                self._cleanup()  
-                return
-
-            self._write_to_csv(dto.transactions)
-        
+            
+            query_name = routing_key.split('.')[0]  # 'q1' o 'q3'
+            
+            if dto.batch_type == BatchType.EOF:
+                logger.info(f"EOF recibido para {query_name}")
+                self._close_csv_file(query_name)
+                self.eof_received.add(query_name)
+                
+                # Si recibimos EOF de todas las queries, terminar
+                if len(self.eof_received) >= 2:  # q1 y q3
+                    logger.info("Todos los reportes completados")
+                    return True
+                
+                return False
+            
+            if dto.batch_type == BatchType.RAW_CSV:
+                self._write_to_csv(dto.data, query_name)
+            
+            return False
+            
         except Exception as e:
-            logger.error(f"Error procesando mensaje: {e}. Mensaje recibido: {message}")
-
-    def save_report_to_file(self):
-        """
-        Guarda el reporte en un archivo CSV.
-        """
-        try:
-            if not self.items_processed:
-                logger.warning("No hay datos procesados para guardar en el reporte.")
-                return
-
-            headers = self.items_processed[0].keys()
-
-            reports_dir = './reports'  
-            os.makedirs(reports_dir, exist_ok=True)
-            os.chmod(reports_dir, 0o755)  
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{reports_dir}/coffee_shop_report_{timestamp}.csv"
-
-            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=headers)
-                writer.writeheader()  
-                writer.writerows(self.items_processed)  
-
-            os.chmod(filename, 0o644)
-
-            logger.info(f"Reporte CSV guardado en: {filename}")
-
-        except Exception as e:
-            logger.error(f"Error guardando reporte CSV: {e}")
+            logger.error(f"Error procesando mensaje: {e}")
+            return False
 
     def on_message_callback(self, ch, method, properties, body):
-        """
-        Callback para RabbitMQ cuando llega un mensaje.
-        """
+        """Callback para RabbitMQ cuando llega un mensaje."""
         try:
-            self.process_message(body)  
+            routing_key = method.routing_key  # ✅ Obtener routing key
+            should_stop = self.process_message(body, routing_key)  # ✅ Pasar routing key
+            
+            if should_stop:
+                logger.info("Todos los reportes generados - deteniendo consuming")
+                ch.stop_consuming()
         except Exception as e:
             logger.error(f"Error en el callback de mensaje: {e}")
 
     def start(self):
-        """
-        Inicia el ReportGenerator.
-        """
+        """Inicia el ReportGenerator."""
         logger.info("Iniciando ReportGenerator...")
-        logger.info(f"Consumiendo de: {self.input_queue}")
         
         try:
-            self._initialize_csv_file()  
             self.input_middleware.start_consuming(self.on_message_callback)
         except KeyboardInterrupt:
             logger.info("ReportGenerator detenido manualmente")
         except Exception as e:
             logger.error(f"Error durante el consumo: {e}")
         finally:
-            self._close_csv_file()  
             self._cleanup()
 
     def _cleanup(self):
         try:
+            # Cerrar cualquier archivo CSV abierto
+            for query_name in list(self.csv_files.keys()):
+                self._close_csv_file(query_name)
+            
             if self.input_middleware:
                 self.input_middleware.close()
                 logger.info("Conexión cerrada")
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
 
-    def _initialize_csv_file(self):
-        """
-        Inicializa el archivo CSV y escribe los encabezados.
-        """
+    def _initialize_csv_file(self, query_name: str, sample_data: str):
+        """Inicializa el archivo CSV con headers."""
         try:
             reports_dir = './reports'
             os.makedirs(reports_dir, exist_ok=True)
             os.chmod(reports_dir, 0o755)
 
-            self.csv_filename = f"{reports_dir}/query1.csv"
-
-            self.csv_file = open(self.csv_filename, 'w', newline='', encoding='utf-8')
-            self.csv_writer = None
-            logger.info(f"Archivo CSV inicializado: {self.csv_filename}")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{reports_dir}/{query_name}_{timestamp}.csv"
+            
+            self.csv_files[query_name] = open(filename, 'w', encoding='utf-8')
+            
+            # Escribir header desde la primera línea del sample data
+            header_line = sample_data.strip().split('\n')[0]
+            self.csv_files[query_name].write(header_line + '\n')
+            self.csv_files[query_name].flush()
+            
+            logger.info(f"Archivo CSV inicializado: {filename}")
 
         except Exception as e:
-            logger.error(f"Error inicializando el archivo CSV: {e}")
+            logger.error(f"Error inicializando el archivo CSV para {query_name}: {e}")
             raise
 
-    def _write_to_csv(self, transactions):
-        """
-        Escribe las transacciones en el archivo CSV, incluyendo solo las columnas necesarias.
-        """
+    def _write_to_csv(self, csv_data: str, query_name: str):
+        """Escribe datos al archivo CSV correspondiente."""
         try:
-            # Inicializar CSV writer si es necesario
-            if not self.csv_writer:
-                headers = ["transaction_id", "final_amount"]
-                self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=headers)
-                self.csv_writer.writeheader()
-
-            # Manejar tanto CSV raw como lista de diccionarios
-            if isinstance(transactions, str):
-                # Es CSV raw, procesarlo línea por línea
-                lines = transactions.strip().split('\n')
-                for line in lines:
-                    if line.strip():  # Evitar líneas vacías
-                        values = line.split(',')
-                        if len(values) >= 8:  # Verificar que tiene suficientes columnas
-                            transaction_id = values[0]
-                            final_amount = values[7]  # final_amount está en la columna 7
-                            self.csv_writer.writerow({
-                                "transaction_id": transaction_id,
-                                "final_amount": final_amount
-                            })
-            else:
-                # Es lista de diccionarios
-                filtered_transactions = [
-                    {"transaction_id": transaction["transaction_id"], "final_amount": transaction["final_amount"]}
-                    for transaction in transactions
-                ]
-                self.csv_writer.writerows(filtered_transactions)
-
+            # Inicializar archivo si no existe
+            if query_name not in self.csv_files:
+                self._initialize_csv_file(query_name, csv_data)
+            
+            # Escribir datos (skip header)
+            lines = csv_data.strip().split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Skip headers comunes
+                if any(header in line.lower() for header in ['transaction_id', 'year_half', 'store_name']):
+                    continue
+                
+                self.csv_files[query_name].write(line + '\n')
+            
+            self.csv_files[query_name].flush()
+            
         except Exception as e:
-            logger.error(f"Error escribiendo en el archivo CSV: {e}")
+            logger.error(f"Error escribiendo en CSV para {query_name}: {e}")
             raise
 
-    def _close_csv_file(self):
-        """
-        Cierra el archivo CSV si está abierto.
-        """
+    def _close_csv_file(self, query_name: str):
+        """Cierra el archivo CSV para una query específica."""
         try:
-            if hasattr(self, 'csv_file') and self.csv_file:
-                self.csv_file.close()
-                os.chmod(self.csv_filename, 0o644)
-                logger.info(f"Archivo CSV cerrado: {self.csv_filename}")
+            if query_name in self.csv_files:
+                self.csv_files[query_name].close()
+                logger.info(f"Archivo CSV cerrado para {query_name}")
+                del self.csv_files[query_name]
         except Exception as e:
-            logger.error(f"Error cerrando el archivo CSV: {e}")
+            logger.error(f"Error cerrando el archivo CSV para {query_name}: {e}")
+
 
 if __name__ == "__main__":
     report_generator = ReportGenerator()
