@@ -2,6 +2,14 @@ import numpy as np
 import pandas as pd
 import os
 
+# Utils
+
+def remove_last_newline(filename):
+    with open(filename, 'rb+') as file:
+        file.seek(-1, os.SEEK_END)
+        if file.read(1) == b'\n':
+            file.truncate(file.tell() - 1)
+
 # Filename Importing
 
 transactions_files = [f for f in os.listdir('./data/transactions') if f.startswith('transactions_') and f.endswith('.csv') and ('2024' in f or '2025' in f)]
