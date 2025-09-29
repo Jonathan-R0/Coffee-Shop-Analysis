@@ -97,3 +97,59 @@ q1_transactions_6_to_23_hours_gt_15 = q1_transactions_6_to_23_hours[q1_transacti
 generated_q1_filename = './reports/generated_query1.csv'
 q1_transactions_6_to_23_hours_gt_15[["transaction_id", "final_amount"]].sort_values(by="transaction_id", ascending=True).to_csv(generated_q1_filename, index=False, lineterminator='\n')
 remove_last_newline(generated_q1_filename)
+
+# Query 2
+
+transaction_items = pd.concat([transactions_items_2024, transactions_items_2025], ignore_index=True)
+transaction_items["year_month_created_at"] = transaction_items["created_at"].dt.strftime("%Y-%m")
+transaction_items_by_year_month = transaction_items.groupby(["year_month_created_at", "item_id"])
+menu_items_names_only = menu_items[["item_id", "item_name"]]
+
+q2_groups_with_quantity = transaction_items_by_year_month["transaction_id"].count().reset_index(drop=False).rename(columns={"transaction_id":"sellings_qty"})
+q2_best_selling = q2_groups_with_quantity.sort_values(by=["year_month_created_at", "sellings_qty"], ascending=[True, False]).groupby(["year_month_created_at"]).head(1)
+
+q2_groups_with_subtotal = transaction_items_by_year_month["subtotal"].sum().reset_index(drop=False).rename(columns={"subtotal":"profit_sum"})
+q2_most_profits = q2_groups_with_subtotal.sort_values(by=["year_month_created_at", "profit_sum"], ascending=[True, False]).groupby(["year_month_created_at"]).head(1)
+
+q2_best_selling_with_name = pd.merge(q2_best_selling, menu_items_names_only, on="item_id")
+q2_most_profits_with_name = pd.merge(q2_most_profits, menu_items_names_only, on="item_id")
+
+q2_best_selling_with_name_filename = './reports/generated_query2a.csv'
+q2_most_profits_with_name_filename = './reports/generated_query2b.csv'
+q2_best_selling_with_name[["year_month_created_at", "item_name", "sellings_qty"]].to_csv(q2_best_selling_with_name_filename, index=False, lineterminator='\n')
+q2_most_profits_with_name[["year_month_created_at", "item_name", "profit_sum"]].to_csv(q2_most_profits_with_name_filename, index=False, lineterminator='\n')
+
+remove_last_newline(q2_best_selling_with_name_filename)
+remove_last_newline(q2_most_profits_with_name_filename)
+
+# Query 3
+
+q3_transactions_6_to_23_hours = q1_transactions_6_to_23_hours[["created_at", "store_id", "final_amount"]].copy()
+q3_transactions_6_to_23_hours.loc[q3_transactions_6_to_23_hours["created_at"].dt.month <= 6, "half_created_at"] = "1"
+q3_transactions_6_to_23_hours.loc[q3_transactions_6_to_23_hours["created_at"].dt.month >= 7, "half_created_at"] = "2"
+q3_transactions_6_to_23_hours["year_half_created_at"] = q3_transactions_6_to_23_hours["created_at"].dt.year.astype(str) + "-H" + q3_transactions_6_to_23_hours["half_created_at"]
+q3_transactions_by_year_half = q3_transactions_6_to_23_hours.groupby(["year_half_created_at", "store_id"])
+stores_names_only = stores[["store_id", "store_name"]]
+
+q3_groups_with_tpv = q3_transactions_by_year_half["final_amount"].sum().reset_index(drop=False).rename(columns={"final_amount":"tpv"})
+q3_tpv_with_name = pd.merge(q3_groups_with_tpv, stores_names_only, on="store_id")
+q3_tpv_with_name_filename = './reports/generated_query3.csv'
+q3_tpv_with_name[["year_half_created_at", "store_name", "tpv"]].to_csv(q3_tpv_with_name_filename, index=False, lineterminator='\n')
+
+remove_last_newline(q3_tpv_with_name_filename)
+
+# Query 4
+
+transactions_by_store_user = transactions.dropna(subset=['user_id']).groupby(["store_id", "user_id"])
+stores_names_only = stores[["store_id", "store_name"]]
+users_birthdates_only = users[["user_id", "birthdate"]]
+
+q4_groups_with_most_purchases = transactions_by_store_user["transaction_id"].count().reset_index(drop=False).rename(columns={"transaction_id":"purchases_qty"})
+q4_most_purchases = q4_groups_with_most_purchases.sort_values(by=["store_id", "purchases_qty"], ascending=[True, False]).groupby(["store_id"]).head(3)
+
+q4_most_purchases_with_store = pd.merge(q4_most_purchases, stores_names_only, on="store_id")
+q4_most_purchases_with_store_and_user = pd.merge(q4_most_purchases_with_store, users_birthdates_only, on="user_id")
+q4_most_purchases_with_store_and_user_filename = './reports/generated_query4.csv'
+q4_most_purchases_with_store_and_user[["store_name", "birthdate"]].to_csv(q4_most_purchases_with_store_and_user_filename, index=False, lineterminator='\n')
+
+remove_last_newline(q4_most_purchases_with_store_and_user_filename)
