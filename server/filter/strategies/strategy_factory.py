@@ -1,34 +1,15 @@
 import logging
 from typing import Optional
-from base_strategy import FilterStrategy
-from year_filter_strategy import YearFilterStrategy
-from hour_filter_strategy import HourFilterStrategy
-from amount_filter_strategy import AmountFilterStrategy
+from .base_strategy import FilterStrategy
+from .year_filter_strategy import YearFilterStrategy
+from .hour_filter_strategy import HourFilterStrategy
+from .amount_filter_strategy import AmountFilterStrategy
 
 logger = logging.getLogger(__name__)
 
 class FilterStrategyFactory:
-    """
-    Factory para crear instancias de estrategias de filtro basándose en la configuración.
-    """
-    
     @staticmethod
     def create_strategy(filter_mode: str, **config) -> Optional[FilterStrategy]:
-        """
-        Crea una instancia de estrategia de filtro basándose en el modo especificado.
-        
-        Args:
-            filter_mode (str): Tipo de filtro ('year', 'hour', 'amount')
-            **config: Parámetros de configuración específicos para cada estrategia
-            
-        Returns:
-            FilterStrategy: Instancia de la estrategia correspondiente
-            None: Si el modo de filtro no es reconocido
-            
-        Raises:
-            ValueError: Si faltan parámetros requeridos para la estrategia
-        """
-        
         if filter_mode == 'year':
             filter_years = config.get('filter_years')
             if not filter_years:
@@ -67,25 +48,10 @@ class FilterStrategyFactory:
     
     @staticmethod
     def get_available_strategies() -> list:
-        """
-        Retorna una lista de estrategias de filtro disponibles.
-        
-        Returns:
-            list: Lista de nombres de estrategias disponibles
-        """
         return ['year', 'hour', 'amount']
     
     @staticmethod
     def get_strategy_requirements(filter_mode: str) -> dict:
-        """
-        Retorna los parámetros requeridos para una estrategia específica.
-        
-        Args:
-            filter_mode (str): Tipo de filtro
-            
-        Returns:
-            dict: Diccionario con los parámetros requeridos y sus descripciones
-        """
         requirements = {
             'year': {
                 'filter_years': 'Lista de años permitidos (ej: "2024,2025" o ["2024", "2025"])'

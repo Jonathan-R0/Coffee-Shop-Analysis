@@ -8,7 +8,7 @@ from common.protocol import Protocol, ProtocolMessage
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dataclasses import asdict
 from logger import get_logger
-from dtos.dto import TransactionBatchDTO, BatchType, StoreBatchDTO
+from dtos.dto import TransactionBatchDTO, BatchType, StoreBatchDTO,UserBatchDTO
 
 logger = get_logger(__name__)
 
@@ -21,10 +21,10 @@ class Gateway:
         self._is_running = False
         self._middleware = MessageMiddlewareQueue(host=rabbitmq_host, queue_name=output_queue)
         self._reports_exchange = reports_exchange
-        self._store_middleware = MessageMiddlewareExchange(
+        self._join_middleware = MessageMiddlewareExchange(
             host=rabbitmq_host,
             exchange_name=store_exchange,
-            route_keys=['stores.data', 'stores.eof']
+            route_keys=['stores.data', 'stores.eof','users.data','users.eof']
         )
         
         self.report_middleware = MessageMiddlewareExchange(
@@ -56,6 +56,8 @@ class Gateway:
                         self.process_type_d_message(message)
                     elif message.file_type == "S":
                         self.process_type_s_message(message)
+                    elif message.file_type == "U":
+                        self.process_type_u_message(message)
                     else:
                         self._middleware.send(asdict(message))
                 else:
@@ -79,9 +81,15 @@ class Gateway:
             elif file_type == "S":
                 # EOF para stores
                 eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._store_middleware.send(eof_dto.to_bytes_fast(), routing_key='stores.eof')
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='stores.eof')
                 logger.info("EOF:1 enviado para tipo S (stores)")
-            
+
+            elif file_type == "U":
+                # EOF para users
+                eof_dto = UserBatchDTO("EOF:1", batch_type=BatchType.EOF)
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='users.eof')
+                logger.info("EOF:1 enviado para tipo U (users)")
+
         except Exception as e:
             logger.error(f"Error manejando FINISH: {e}")
             
@@ -110,12 +118,31 @@ class Gateway:
             serialized_data = dto.to_bytes_fast()
 
 
-            self._store_middleware.send(serialized_data, routing_key='stores.data')
+            self._join_middleware.send(serialized_data, routing_key='stores.data')
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
             logger.info(f"Stores enviados a store_data queue: Líneas: {line_count}")
             
+        except Exception as e:
+            logger.error(f"Error procesando mensaje de tipo 'U': {e}")
+            
+    def process_type_u_message(self, message: ProtocolMessage):
+        """
+        Procesa un mensaje de tipo 'U' (stores), utilizando UserBatchDTO.
+        """
+        try:
+            bytes_data = message.data.encode('utf-8')
+            dto = UserBatchDTO.from_bytes_fast(bytes_data)
+            serialized_data = dto.to_bytes_fast()
+
+
+            self._join_middleware.send(serialized_data, routing_key='users.data')
+
+
+            line_count = len([line for line in dto.data.split('\n') if line.strip()])
+            logger.info(f"Users enviados a users.data queue: Líneas: {line_count}")
+
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
 
@@ -298,8 +325,8 @@ class Gateway:
         if self._middleware:
             self._middleware.close()
             logger.info("Conexión con RabbitMQ cerrada.")
-        if self._store_middleware:
-            self._store_middleware.close()
+        if self._join_middleware:
+            self._join_middleware.close()
             logger.info("Conexión con RabbitMQ cerrada.")
         logger.info("Servidor detenido correctamente.")
         sys.exit(0)

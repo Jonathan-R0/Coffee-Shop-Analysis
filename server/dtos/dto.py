@@ -208,20 +208,16 @@ class UserBatchDTO(BaseDTO):
         }
     
     def get_column_index(self, column_name: str) -> int:
-        """Mapeo de columnas para stores"""
+        """Mapeo de columnas para users"""
         column_map = {
-            'store_id': 0,
-            'store_name': 1,
-            'street': 2,
-            'postal_code': 3,
-            'city': 4,
-            'state': 5,
-            'latitude': 6,
-            'longitude': 7
+            'user_id': 0,
+            'gender': 1,
+            'birthdate': 2,
+            'registered_at': 3
         }
         
         if column_name not in column_map:
-            raise ValueError(f"Columna '{column_name}' no existe en stores")
+            raise ValueError(f"Columna '{column_name}' no existe en users")
         
         return column_map[column_name]
 

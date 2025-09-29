@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Dict, List
 from rabbitmq.middleware import MessageMiddlewareExchange
-from dtos.dto import TransactionBatchDTO, StoreBatchDTO, BatchType
+from dtos.dto import TransactionBatchDTO, StoreBatchDTO, UserBatchDTO, BatchType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,32 +14,39 @@ class JoinNode:
         
         # Exchange que recibe tanto stores como TPV con diferentes routing keys
         self.input_exchange = os.getenv('INPUT_EXCHANGE', 'join.exchange')
-        self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'join.exchange')
+        self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'report.exchange')
         
         self.input_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.input_exchange,
-            route_keys=['stores.data', 'tpv.data', 'stores.eof', 'tpv.eof']
+            route_keys=['stores.data', 'tpv.data', 'stores.eof', 'tpv.eof', 
+                       'top_customers.data', 'top_customers.eof',
+                       'users.data', 'users.eof']
         )
         self.output_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.output_exchange,
-            route_keys=['q3.data', 'q3.eof']
+            route_keys=['q3.data', 'q3.eof', 'q4.data', 'q4.eof']
         )
         
         self.stores_data: Dict[str, Dict] = {}  # store_id -> store_info
+        self.users_data: Dict[str, Dict] = {}  # user_id -> user_info  
         self.tpv_data: List[Dict] = []  # Lista de resultados TPV
+        self.top_customers_data: List[Dict] = []  # Lista de top customers por store
         self.joined_data: List[Dict] = []  # Datos después del JOIN
         
         self.groupby_eof_count = 0
         self.stores_loaded = False
+        self.users_loaded = False
+        self.top_customers_loaded = False
         self.expected_groupby_nodes = 2  # Semestre 1 y 2
 
         self.store_dto_helper = StoreBatchDTO("", BatchType.RAW_CSV)
+        self.user_dto_helper = UserBatchDTO("", BatchType.RAW_CSV)
 
         logger.info(f"JoinNode inicializado:")
         logger.info(f"  Exchange: {self.input_exchange}")
-        logger.info(f"  Routing keys: stores.data, tpv.data, stores.eof, tpv.eof")
+        logger.info(f"  Routing keys: stores.data, users.data, tpv.data, top_customers.data, stores.eof, users.eof, tpv.eof, top_customers.eof")
     
     def _process_store_batch(self, csv_data: str):
         """
@@ -70,6 +77,52 @@ class JoinNode:
                 continue
         
         logger.info(f"Stores procesados: {processed_count}. Total en memoria: {len(self.stores_data)}")
+    
+    def _process_user_batch(self, csv_data: str):
+        """
+        Procesa un batch de datos de users y los guarda en memoria.
+        Estructura real: user_id	gender	birthdate	registered_at (separado por TABS)
+        """
+        processed_count = 0
+        
+        logger.info(f"Procesando batch de users, longitud: {len(csv_data)}")
+        lines = csv_data.split('\n')
+        logger.info(f"Total líneas en batch: {len(lines)}")
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            
+            if i < 3:  # Debug: mostrar primeras 3 líneas
+                logger.info(f"Línea {i}: '{line}'")
+            
+            try:
+                user_id = self.user_dto_helper.get_column_value(line, 'user_id')
+                birthdate = self.user_dto_helper.get_column_value(line, 'birthdate')  # Usar 'birthdate' no 'birth_date'
+                gender = self.user_dto_helper.get_column_value(line, 'gender')
+                registered_at = self.user_dto_helper.get_column_value(line, 'registered_at')
+                
+                if i < 3:  # Debug: mostrar valores extraídos
+                    logger.info(f"Extraído - user_id: '{user_id}', birthdate: '{birthdate}', gender: '{gender}'")
+                
+                # Verificar que user_id y birthdate no estén vacíos y no sea header
+                if user_id and birthdate and user_id != 'user_id':
+                    self.users_data[user_id] = {
+                        'user_id': user_id,
+                        'gender': gender,
+                        'birth_date': birthdate,  # Mantener como birth_date para consistencia en el resto del código
+                        'registered_at': registered_at,
+                        'raw_line': line
+                    }
+                    processed_count += 1
+                    
+            except Exception as e:
+                if i < 5:  # Solo mostrar errores de las primeras líneas
+                    logger.warning(f"Error procesando línea de user {i}: {line}, error: {e}")
+                continue
+        
+        logger.info(f"Users procesados: {processed_count}. Total en memoria: {len(self.users_data)}")
     
     def _process_tpv_batch(self, csv_data: str):
         """
@@ -103,6 +156,45 @@ class JoinNode:
         
         if self.stores_loaded:
             self._perform_join()
+    
+    def _process_top_customers_batch(self, csv_data: str):
+        """
+        Procesa un batch de resultados de top customers.
+        Formato esperado: store_id,user_id,purchases_qty
+        """
+        processed_count = 0
+        
+        for line in csv_data.split('\n'):
+            line = line.strip()
+            if not line or line.startswith('store_id,user_id,purchases_qty'):
+                continue
+            
+            try:
+                parts = line.split(',')
+                if len(parts) >= 3:
+                    # Limpiar user_id: convertir de "12345.0" a "12345"
+                    raw_user_id = parts[1]
+                    if '.' in raw_user_id and raw_user_id.endswith('.0'):
+                        user_id = raw_user_id[:-2]  # Remover ".0"
+                    else:
+                        user_id = raw_user_id
+                    
+                    top_customer_record = {
+                        'store_id': parts[0],
+                        'user_id': user_id,
+                        'purchases_qty': int(parts[2])
+                    }
+                    self.top_customers_data.append(top_customer_record)
+                    processed_count += 1
+                    
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Error procesando línea de top customers: {line}, error: {e}")
+                continue
+        
+        logger.info(f"Top customers procesados: {processed_count}. Total en memoria: {len(self.top_customers_data)}")
+        
+        if self.stores_loaded:
+            self._perform_top_customers_join()
     
     def _perform_join(self):
         """
@@ -144,39 +236,179 @@ class JoinNode:
         
         logger.info(f"JOIN completado: {joined_count} registros en memoria")
 
+    def _perform_top_customers_join(self):
+        """
+        Hace JOIN entre stores, top customers y users data para generar tabla final.
+        Resultado: store_name, birthdate
+        """
+        if not self.stores_data:
+            logger.warning("No hay datos de stores para hacer JOIN de top customers")
+            return
+        
+        if not self.top_customers_data:
+            logger.warning("No hay datos de top customers para hacer JOIN")
+            return
+        
+        if not self.users_data:
+            logger.warning("No hay datos de users para hacer JOIN de top customers")
+            return
+        
+        joined_top_customers = []
+        joined_count = 0
+        missing_stores = set()
+        missing_users = set()
+        found_users = 0
+        
+        # Debug: mostrar algunos user_ids de top_customers y algunos de users
+        logger.info(f"Debug - Primeros 5 user_ids en top_customers: {[rec['user_id'] for rec in self.top_customers_data[:5]]}")
+        sample_user_ids = list(self.users_data.keys())[:5]
+        logger.info(f"Debug - Primeros 5 user_ids en users: {sample_user_ids}")
+        
+        for customer_record in self.top_customers_data:
+            store_id = customer_record['store_id']
+            user_id = customer_record['user_id']
+            
+            # Buscar store name
+            if store_id in self.stores_data:
+                store_name = self.stores_data[store_id]['store_name']
+            else:
+                missing_stores.add(store_id)
+                store_name = f"Store_{store_id}"
+            
+            # Buscar user birthday
+            if user_id in self.users_data:
+                birthdate = self.users_data[user_id]['birth_date']
+                found_users += 1
+            else:
+                missing_users.add(user_id)
+                birthdate = 'UNKNOWN'
+            
+            # Formato final: solo store_name y birthdate
+            joined_record = {
+                'store_name': store_name,
+                'birthdate': birthdate
+            }
+            
+            joined_top_customers.append(joined_record)
+            joined_count += 1
+        
+        if missing_stores:
+            logger.warning(f"Stores no encontrados para top customers: {missing_stores}")
+        
+        logger.info(f"Users encontrados: {found_users}/{len(self.top_customers_data)} ({found_users/len(self.top_customers_data)*100:.1f}%)")
+        
+        if missing_users:
+            logger.warning(f"Users no encontrados para top customers (primeros 10): {list(missing_users)[:10]}")
+        
+        logger.info(f"Top customers JOIN completado: {joined_count} registros (store_name, birthdate)")
+        
+        # Enviar resultados de Q4 (top customers)
+        self._send_top_customers_results(joined_top_customers)
+
     
     def _handle_store_eof(self):
         """Maneja EOF de datos de stores."""
         logger.info("EOF recibido de datos de stores")
         self.stores_loaded = True
         
-        if self.tpv_data:
+        # Query 3: Si hay datos TPV y todos los GroupBy han terminado, enviar Q3
+        if self.tpv_data and self.groupby_eof_count >= self.expected_groupby_nodes:
             self._perform_join()
-        
-        if self.groupby_eof_count >= self.expected_groupby_nodes:
-            logger.info("Stores y todos los GroupBy completados - enviando resultados")
+            logger.info("Stores cargados y GroupBy completados - enviando resultados Q3")
             self._send_results_to_exchange()
-            return True  
         
-        return False
+        # Query 4: Si hay datos de top customers y users están cargados, enviar Q4
+        if self.top_customers_data and self.users_loaded:
+            self._perform_top_customers_join()
+        
+        return False  # No cerrar el nodo, puede haber más datos llegando
+    
+    def _handle_user_eof(self):
+        """Maneja EOF de datos de users."""
+        logger.info("EOF recibido de datos de users")
+        self.users_loaded = True
+        
+        # Query 4: Solo enviar cuando stores y top customers estén cargados
+        if self.top_customers_data and self.stores_loaded:
+            logger.info("Users, stores y top customers completados - enviando resultados Q4")
+            self._perform_top_customers_join()
+        else:
+            missing = []
+            if not self.stores_loaded:
+                missing.append("stores")
+            if not self.top_customers_data:
+                missing.append("top_customers")
+            logger.info(f"Users completado, esperando: {', '.join(missing)} para enviar Q4")
+        
+        return False  # No cerrar el nodo
     
     def _handle_tpv_eof(self):
         """Maneja EOF de los nodos GroupBy."""
         self.groupby_eof_count += 1
+        logger.info(f"EOF TPV recibido: {self.groupby_eof_count}/{self.expected_groupby_nodes}")
         
+        # Query 3: Solo enviar cuando todos los GroupBy hayan terminado Y stores estén cargados
         if self.groupby_eof_count >= self.expected_groupby_nodes:
-            
-            if self.stores_loaded and not self.joined_data:
-                self._perform_join()
-            
             if self.stores_loaded:
-                logger.info("Stores y GroupBy completados - enviando resultados")
+                if not self.joined_data:  # Solo hacer JOIN si no se ha hecho ya
+                    self._perform_join()
+                logger.info("Todos los GroupBy completados y stores cargados - enviando resultados Q3")
                 self._send_results_to_exchange()
-                return True  
             else:
-                logger.info("Esperando EOF de stores...")
+                logger.info("Todos los GroupBy completados, esperando EOF de stores para enviar Q3...")
         
-        return False
+        return False  # No cerrar el nodo
+    
+    def _handle_top_customers_eof(self):
+        """Maneja EOF de top customers."""
+        logger.info("EOF recibido de top customers")
+        self.top_customers_loaded = True
+        
+        # Query 4: Solo enviar cuando stores y users estén cargados
+        if self.stores_loaded and self.users_loaded:
+            logger.info("Top customers, stores y users completados - enviando resultados Q4")
+            self._perform_top_customers_join()
+        else:
+            missing = []
+            if not self.stores_loaded:
+                missing.append("stores")
+            if not self.users_loaded:
+                missing.append("users")
+            logger.info(f"Top customers completado, esperando EOF de: {', '.join(missing)} para enviar Q4")
+        
+        return False  # No cerrar el nodo
+    
+    def _send_top_customers_results(self, joined_top_customers):
+        """Envía los resultados de top customers al exchange de reportes con formato store_name,birthdate."""
+        try:
+            if not joined_top_customers:
+                logger.warning("No hay datos de top customers joinados para enviar")
+                return
+            
+            # Formato final: store_name,birthdate
+            csv_lines = ["store_name,birthdate"]
+            for record in joined_top_customers:
+                csv_lines.append(f"{record['store_name']},{record['birthdate']}")
+            
+            results_csv = '\n'.join(csv_lines)
+            
+            logger.info(f"Resultados Q4 generados:")
+            logger.info(f"  Total registros: {len(joined_top_customers)}")
+            logger.info(f"  Formato: store_name,birthdate")
+            logger.info(f"  Primeras líneas:")
+            for i, line in enumerate(csv_lines[:5]):  # Mostrar primeras 5 líneas
+                logger.info(f"    {line}")
+            
+            result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
+            self.output_middleware.send(result_dto.to_bytes_fast(), routing_key='q4.data')
+            
+            eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+            self.output_middleware.send(eof_dto.to_bytes_fast(), routing_key='q4.eof')
+            
+            logger.info(f"Resultados Q4 (top customers con birthdate) enviados: {len(joined_top_customers)} registros")
+            
+        except Exception as e:
+            logger.error(f"Error enviando resultados de top customers: {e}")
     
     def _send_results_to_exchange(self):
         """Envía los resultados del JOIN al exchange de reportes."""
@@ -220,6 +452,15 @@ class JoinNode:
                 if dto.batch_type == BatchType.RAW_CSV:
                     self._process_store_batch(dto.data)
                     
+            elif routing_key in ['users.data', 'users.eof']:
+                dto = UserBatchDTO.from_bytes_fast(message)
+                
+                if dto.batch_type == BatchType.EOF:
+                     return self._handle_user_eof()
+                
+                if dto.batch_type == BatchType.RAW_CSV:
+                    self._process_user_batch(dto.data)
+                    
             elif routing_key in ['tpv.data', 'tpv.eof']:
                 dto = TransactionBatchDTO.from_bytes_fast(message)
                 
@@ -228,6 +469,15 @@ class JoinNode:
                 
                 if dto.batch_type == BatchType.RAW_CSV:
                     self._process_tpv_batch(dto.data)
+            
+            elif routing_key in ['top_customers.data', 'top_customers.eof']:
+                dto = TransactionBatchDTO.from_bytes_fast(message)
+                
+                if dto.batch_type == BatchType.EOF:
+                    return self._handle_top_customers_eof()
+                
+                if dto.batch_type == BatchType.RAW_CSV:
+                    self._process_top_customers_batch(dto.data)
             
             return False
             

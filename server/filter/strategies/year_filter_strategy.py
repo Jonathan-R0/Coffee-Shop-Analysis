@@ -1,15 +1,11 @@
 import logging
 from datetime import datetime
-from base_strategy import FilterStrategy
+from .base_strategy import FilterStrategy
 from dtos.dto import TransactionBatchDTO, BatchType
 
 logger = logging.getLogger(__name__)
 
 class YearFilterStrategy(FilterStrategy):
-    """
-    Estrategia de filtro que evalúa transacciones basándose en el año.
-    """
-    
     def __init__(self, filter_years: list):
         self.filter_years = filter_years
         self.count = 0

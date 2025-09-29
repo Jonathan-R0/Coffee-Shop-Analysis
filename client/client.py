@@ -38,7 +38,7 @@ class Client:
             "D": "/data/transactions",
             #"D": "/data/transactions_test",
             #"D": "/data/transaction_items",
-            #"users": "/data/users",
+            "U": "/data/users",
             "S": "/data/stores",
             #"menu_items": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
@@ -65,8 +65,6 @@ class Client:
             
             if self.protocol:
                 self.protocol.send_exit_message()
-                # Después de enviar EXIT, esperar el reporte del servidor
-                self._receive_report()
 
         except Exception as e:
             logger.error(f"Error procesando archivos desde volúmenes: {e}")
@@ -96,112 +94,6 @@ class Client:
         except Exception as e:
             logger.error(f"Error en send_data: {e}")
             raise
-    
-    def _receive_report(self):
-        """Recibe el reporte del servidor en batches y lo guarda."""
-        try:
-            logger.info("Esperando reporte del servidor...")
-            
-            # Crear directorio reports si no existe
-            reports_dir = "/reports"
-            logger.info(f"Creando directorio: {reports_dir}")
-            os.makedirs(reports_dir, exist_ok=True)
-            
-            # Verificar que se creó correctamente
-            if os.path.exists(reports_dir):
-                logger.info(f"Directorio creado/existe: {reports_dir}")
-                logger.info(f"Permisos del directorio: {oct(os.stat(reports_dir).st_mode)[-3:]}")
-            else:
-                logger.error(f"No se pudo crear el directorio: {reports_dir}")
-                return
-            
-            report_content = []
-            batch_count = 0
-            
-            while True:
-                # Recibir un mensaje del servidor
-                response = self.protocol._receive_single_message()
-                
-                if response is None:
-                    logger.warning("Conexión cerrada por el servidor")
-                    # Si tenemos datos, guardarlos aunque no hayamos recibido EOF
-                    if report_content:
-                        logger.info(f"Guardando reporte incompleto con {batch_count} batches recibidos")
-                        self._save_report(report_content, reports_dir)
-                    break
-                
-                if response.action == "RPRT":
-                    batch_count += 1
-                    logger.info(f"Recibido batch {batch_count} del reporte: {len(response.data)} bytes")
-                    
-                    # Agregar el contenido del batch
-                    if response.data:
-                        report_content.append(response.data)
-                        
-                elif response.action == "EOF":
-                    logger.info(f"EOF recibido. Total batches: {batch_count}")
-                    if report_content:
-                        self._save_report(report_content, reports_dir)
-                    else:
-                        logger.warning("EOF recibido pero no hay contenido del reporte")
-                    break
-                        
-                elif response.action == "ERRO":
-                    logger.error(f"Error del servidor: {response.data}")
-                    break
-                else:
-                    logger.warning(f"Mensaje inesperado del servidor: {response.action}")
-                    
-        except Exception as e:
-            logger.error(f"Error recibiendo reporte: {e}")
-    
-    def _save_report(self, report_batches, reports_dir):
-        """Guarda el reporte completo combinando todos los batches."""
-        try:
-            logger.info(f"Iniciando guardado del reporte...")
-            logger.info(f"Directorio destino: {reports_dir}")
-            logger.info(f"Número de batches a combinar: {len(report_batches)}")
-            
-            # Verificar que el directorio existe y es escribible
-            if not os.path.exists(reports_dir):
-                logger.error(f"El directorio {reports_dir} no existe")
-                return
-            
-            if not os.access(reports_dir, os.W_OK):
-                logger.error(f"No hay permisos de escritura en {reports_dir}")
-                return
-            
-            # Combinar todos los batches
-            full_report = '\n'.join(report_batches)
-            logger.info(f"Reporte combinado - tamaño: {len(full_report)} caracteres")
-            
-            # Guardar en archivo
-            report_path = os.path.join(reports_dir, "query1.csv")
-            logger.info(f"Intentando escribir archivo: {report_path}")
-            
-            with open(report_path, 'w', encoding='utf-8') as f:
-                f.write(full_report)
-                f.flush()  # Asegurar que se escriba inmediatamente
-            
-            # Verificar que el archivo se creó
-            if os.path.exists(report_path):
-                file_size = os.path.getsize(report_path)
-                logger.info(f"Archivo creado exitosamente: {report_path}")
-                logger.info(f"Tamaño del archivo: {file_size} bytes")
-            else:
-                logger.error(f"El archivo no se creó: {report_path}")
-            
-            # Contar líneas para logging
-            lines = len(full_report.split('\n')) if full_report else 0
-            
-            logger.info(f"Reporte guardado en {report_path}")
-            logger.info(f"Total líneas en el reporte: {lines}")
-            logger.info(f"Tamaño del contenido: {len(full_report)} bytes")
-            
-        except Exception as e:
-            logger.error(f"Error guardando reporte: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _cleanup(self):
         """Limpieza de recursos al finalizar."""

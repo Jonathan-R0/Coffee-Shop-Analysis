@@ -1,0 +1,240 @@
+import logging
+import os
+from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
+from dtos.dto import TransactionBatchDTO, BatchType
+from topknode import TopKNode
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+class TopKNodeRunner:
+    """
+    Runner para nodos TopK que puede ser configurado como:
+    - TopK intermedio: recibe datos de múltiples GroupBy nodes
+    - TopK final: recibe datos de múltiples TopK intermedios
+    """
+    
+    def __init__(self):
+        # Configuración básica
+        self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
+        self.is_final = os.getenv('TOPK_MODE', 'intermediate') == 'final'
+        self.node_id = os.getenv('TOPK_NODE_ID', '1')
+        
+        # Para nodos finales: número de nodos intermedios que esperan
+        self.total_nodes = int(os.getenv('TOTAL_TOPK_NODES', '1'))
+        
+        # Crear el nodo TopK
+        self.topk_node = TopKNode(
+            is_final=self.is_final, 
+            total_nodes=self.total_nodes
+        )
+        
+        # Configurar entrada según el tipo de nodo
+        self._setup_input_middleware()
+        
+        # Configurar salida según el tipo de nodo
+        self._setup_output_middleware()
+        
+        logger.info(f"TopKNodeRunner inicializado:")
+        logger.info(f"  Modo: {'Final' if self.is_final else 'Intermedio'}")
+        logger.info(f"  Node ID: {self.node_id}")
+        if self.is_final:
+            logger.info(f"  Esperando {self.total_nodes} nodos TopK intermedios")
+    
+    def _setup_input_middleware(self):
+        """Configura el middleware de entrada según el tipo de nodo."""
+        if self.is_final:
+            # Nodo final: recibe de múltiples TopK intermedios via exchange
+            input_exchange = os.getenv('INPUT_EXCHANGE', 'topk.exchange')
+            routing_keys = ['topk.local.data', 'topk.local.eof']
+            
+            self.input_middleware = MessageMiddlewareExchange(
+                host=self.rabbitmq_host,
+                exchange_name=input_exchange,
+                route_keys=routing_keys
+            )
+            logger.info(f"  Input Exchange: {input_exchange}")
+            logger.info(f"  Input Routing Keys: {routing_keys}")
+        else:
+            # Nodo intermedio: recibe de cola específica (round-robin con otros nodos)
+            input_queue = os.getenv('INPUT_QUEUE', 'aggregated_data')
+            
+            self.input_middleware = MessageMiddlewareQueue(
+                host=self.rabbitmq_host,
+                queue_name=input_queue
+            )
+            logger.info(f"  Input Queue: {input_queue}")
+    
+    def _setup_output_middleware(self):
+        """Configura el middleware de salida según el tipo de nodo."""
+        output_exchange = os.getenv('OUTPUT_EXCHANGE', 'topk.exchange')
+        
+        # Obtener routing keys del nodo TopK
+        output_routing_keys = [
+            self.topk_node.get_output_routing_key(),
+            self.topk_node.get_eof_routing_key()
+        ]
+        
+        self.output_middleware = MessageMiddlewareExchange(
+            host=self.rabbitmq_host,
+            exchange_name=output_exchange,
+            route_keys=output_routing_keys
+        )
+        
+        # Para nodos intermedios, agregar input middleware para requeue EOF
+        if not self.is_final:
+            self.input_requeue_middleware = self.input_middleware
+        
+        logger.info(f"  Output Exchange: {output_exchange}")
+        logger.info(f"  Output Routing Keys: {output_routing_keys}")
+    
+    def _process_csv_batch(self, csv_data: str):
+        """Procesa un batch de datos CSV."""
+        processed_count = 0
+        
+        for line in csv_data.split('\n'):
+            line = line.strip()
+            if not line or line.startswith('store_id,user_id,purchases_qty'):
+                continue
+            
+            self.topk_node.process_csv_line(line)
+            processed_count += 1
+        
+        if processed_count > 0:
+            logger.info(f"Procesadas {processed_count} líneas en batch")
+    
+    def _handle_eof_message(self, dto: TransactionBatchDTO) -> bool:
+        """Maneja mensaje EOF con coordinación entre TopK intermedios."""
+        try:
+            if self.is_final:
+                # Nodo final: lógica original
+                should_send_results = self.topk_node.increment_eof_count()
+                
+                if should_send_results:
+                    logger.info("Generando y enviando resultados TopK")
+                    
+                    # Generar resultados CSV
+                    results_csv = self.topk_node.generate_results_csv()
+                    
+                    # Enviar datos
+                    result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
+                    self.output_middleware.send(
+                        result_dto.to_bytes_fast(),
+                        routing_key=self.topk_node.get_output_routing_key()
+                    )
+                    
+                    # Enviar EOF
+                    eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+                    self.output_middleware.send(
+                        eof_dto.to_bytes_fast(),
+                        routing_key=self.topk_node.get_eof_routing_key()
+                    )
+                    
+                    logger.info("Resultados TopK enviados")
+                    return True
+                
+                return False
+            else:
+                # Nodo intermedio: coordinación EOF con contador
+                eof_data = dto.data.strip()
+                counter = int(eof_data.split(':')[1]) if ':' in eof_data else 1
+                
+                logger.info(f"EOF recibido con counter={counter}, total={self.total_nodes}")
+                
+                # Enviar datos de ESTE nodo TopK intermedio
+                results_csv = self.topk_node.generate_results_csv()
+                
+                logger.info(f"Enviando datos TopK intermedios:")
+                logger.info(f"  Longitud: {len(results_csv)} caracteres")
+                logger.info(f"  Líneas: {len(results_csv.split(chr(10)))}")
+                
+                result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
+                self.output_middleware.send(
+                    result_dto.to_bytes_fast(),
+                    routing_key=self.topk_node.get_output_routing_key()
+                )
+                
+                # TODOS los nodos TopK intermedios envían EOF al TopK final
+                eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+                self.output_middleware.send(
+                    eof_dto.to_bytes_fast(),
+                    routing_key=self.topk_node.get_eof_routing_key()
+                )
+                logger.info("EOF enviado a TopK final")
+                
+                # Solo reenviar EOF para coordinación si no es el último
+                if counter < self.total_nodes:
+                    new_counter = counter + 1
+                    eof_dto_requeue = TransactionBatchDTO(f"EOF:{new_counter}", BatchType.EOF)
+                    self.input_requeue_middleware.send(eof_dto_requeue.to_bytes_fast())
+                    
+                    logger.info(f"EOF:{new_counter} reenviado a input queue para coordinación")
+                
+                logger.info("Datos TopK enviados - cerrando nodo")
+                return True  # SIEMPRE cerrar después de procesar EOF
+            
+        except Exception as e:
+            logger.error(f"Error manejando EOF: {e}")
+            return False
+    
+    def process_message(self, message: bytes, routing_key: str = None) -> bool:
+        """Procesa un mensaje recibido."""
+        try:
+            dto = TransactionBatchDTO.from_bytes_fast(message)
+            
+            if dto.batch_type == BatchType.EOF:
+                return self._handle_eof_message(dto)
+            
+            if dto.batch_type == BatchType.RAW_CSV:
+                self._process_csv_batch(dto.data)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error procesando mensaje: {e}")
+            return False
+    
+    def on_message_callback(self, ch, method, properties, body):
+        """Callback para RabbitMQ."""
+        try:
+            routing_key = getattr(method, 'routing_key', None)
+            should_stop = self.process_message(body, routing_key)
+            if should_stop:
+                logger.info("EOF procesado - deteniendo consuming")
+                ch.stop_consuming()
+        except Exception as e:
+            logger.error(f"Error en callback: {e}")
+    
+    def start(self):
+        """Inicia el nodo TopK."""
+        try:
+            mode_str = "Final" if self.is_final else "Intermedio"
+            logger.info(f"Iniciando TopKNode {mode_str} (ID: {self.node_id})...")
+            self.input_middleware.start_consuming(self.on_message_callback)
+        except KeyboardInterrupt:
+            logger.info("TopKNode detenido manualmente")
+        except Exception as e:
+            logger.error(f"Error durante el consumo: {e}")
+            raise
+        finally:
+            self._cleanup()
+    
+    def _cleanup(self):
+        """Limpia recursos."""
+        try:
+            if self.input_middleware:
+                self.input_middleware.close()
+                logger.info("Input middleware cerrado")
+            
+            if self.output_middleware:
+                self.output_middleware.close()
+                logger.info("Output middleware cerrado")
+                
+        except Exception as e:
+            logger.error(f"Error durante cleanup: {e}")
+
+
+if __name__ == "__main__":
+    runner = TopKNodeRunner()
+    runner.start()

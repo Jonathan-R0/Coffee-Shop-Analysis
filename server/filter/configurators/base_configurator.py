@@ -1,0 +1,29 @@
+import logging
+from abc import ABC, abstractmethod
+from typing import Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+class NodeConfigurator(ABC):
+    def __init__(self, rabbitmq_host: str):
+        self.rabbitmq_host = rabbitmq_host
+    
+    @abstractmethod
+    def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str], 
+                                  output_q4: Optional[str] = None) -> Tuple:
+        pass
+    
+    @abstractmethod
+    def process_filtered_data(self, filtered_csv: str) -> str:
+        pass
+    
+    @abstractmethod
+    def send_data(self, data: str, output_middleware, output_exchange_middleware, 
+                 output_middleware_exchange, output_q4_middleware=None):
+        pass
+    
+    @abstractmethod
+    def send_eof(self, output_middleware, output_exchange_middleware, 
+                output_middleware_exchange, output_q4_middleware=None):
+        pass

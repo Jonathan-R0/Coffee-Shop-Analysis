@@ -1,5 +1,5 @@
 import logging
-from base_strategy import FilterStrategy
+from .base_strategy import FilterStrategy
 from dtos.dto import TransactionBatchDTO, BatchType
 
 logger = logging.getLogger(__name__)

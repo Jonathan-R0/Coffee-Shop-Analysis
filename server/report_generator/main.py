@@ -1,8 +1,8 @@
 import logging
 import os
-
-from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
-from dtos.dto import TransactionBatchDTO
+from datetime import datetime
+from rabbitmq.middleware import MessageMiddlewareExchange
+from dtos.dto import TransactionBatchDTO, BatchType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -11,171 +11,61 @@ class ReportGenerator:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.report_exchange = os.getenv('REPORT_EXCHANGE', 'report.exchange')
-        self.join_exchange = os.getenv('INPUT_EXCHANGE', 'report.join.exchange')
         
-        # Conexión para recibir datos
         self.input_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
-            exchange_name=self.join_exchange,
-            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof']
-        )
-        self.report_middleware = MessageMiddlewareExchange(
-            host=self.rabbitmq_host,
             exchange_name=self.report_exchange,
-            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof']
+            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof']
         )
         
-        # Acumuladores en memoria (listas de strings CSV)
-        self.q1_lines = []  # Cada elemento es una línea: "transaction_id,final_amount"
-        self.q3_lines = []  # Cada elemento es una línea: "year_half_created_at,store_name,tpv"
+        self.csv_files = {}  # Para múltiples archivos
+        self.eof_received = set()  # Tracking de EOF
         
-        # Tracking de EOF
-        self.eof_received = set()
-        
-        logger.info(f"ReportGenerator inicializado")
+        logger.info(f"ReportGenerator inicializado:")
         logger.info(f"  Exchange: {self.report_exchange}")
-        logger.info(f"  RabbitMQ Host: {self.rabbitmq_host}")
+        logger.info(f"  Queries soportadas: Q1, Q3, Q4")
 
     def process_message(self, message: bytes, routing_key: str):
-        """Procesa mensajes según el routing key"""
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
             
-            # Determinar query desde routing key
-            if routing_key.startswith('q1'):
-                query_name = 'q1'
-            elif routing_key.startswith('q3'):
-                query_name = 'q3'
-            else:
-                logger.warning(f"Routing key desconocido: {routing_key}")
-                return False
+            query_name = routing_key.split('.')[0]  # 'q1' o 'q3'
             
-            # Manejar EOF
-            if routing_key.endswith('.eof'):
+            if dto.batch_type == BatchType.EOF:
                 logger.info(f"EOF recibido para {query_name}")
+                self._close_csv_file(query_name)
                 self.eof_received.add(query_name)
                 
-                # Generar y enviar reporte para esta query
-                self._generate_and_send_report(query_name)
-                
-                # Si ya recibimos ambos EOF, terminar
-                if len(self.eof_received) >= 2:
-                    logger.info("Todos los reportes generados - finalizando")
+                # Si recibimos EOF de todas las queries, terminar
+                if len(self.eof_received) >= 3:  # q1, q3 y q4
+                    logger.info("Todos los reportes completados")
                     return True
-                    
+                
                 return False
             
-            # Procesar datos (.data)
-            if routing_key.endswith('.data'):
-                self._accumulate_data(dto.data, query_name)
+            if dto.batch_type == BatchType.RAW_CSV:
+                self._write_to_csv(dto.data, query_name)
             
             return False
             
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             return False
 
-    def _accumulate_data(self, csv_data: str, query_name: str):
-        """Acumula líneas CSV en memoria"""
-        try:
-            lines = csv_data.strip().split('\n')
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                
-                # Saltar headers
-                if 'transaction_id' in line or 'year_half_created_at' in line or 'store_name' in line:
-                    continue
-                
-                # Acumular en la lista correspondiente
-                if query_name == 'q1':
-                    self.q1_lines.append(line)
-                elif query_name == 'q3':
-                    self.q3_lines.append(line)
-                        
-        except Exception as e:
-            logger.error(f"Error acumulando datos para {query_name}: {e}")
-            raise
-
-    def _generate_and_send_report(self, query_name: str):
-        """Genera el reporte final y lo envía al gateway"""
-        try:
-            if query_name == 'q1':
-                lines = self.q1_lines
-                # Q1: Ordenar por transaction_id (primera columna)
-                sorted_lines = sorted(lines, key=lambda x: x.split(',')[0])
-                logger.info(f"Q1: {len(sorted_lines)} transacciones ordenadas por transaction_id")
-            else:  # q3
-                # Q3: No ordenar, enviar tal cual
-                sorted_lines = self.q3_lines
-                logger.info(f"Q3: {len(sorted_lines)} registros (sin ordenar)")
-            
-            if not sorted_lines:
-                logger.warning(f"No hay datos para {query_name}")
-                return
-            
-            # Enviar al gateway
-            self._send_report_to_gateway(sorted_lines, query_name)
-            
-        except Exception as e:
-            logger.error(f"Error generando reporte para {query_name}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-
-    def _send_report_to_gateway(self, lines, query_name: str):
-        """Envía el reporte al gateway usando exchange con routing keys"""
-        try:
-            
-            batch_size = 150
-            total_sent = 0
-            
-            logger.info(f"{query_name}: Enviando {len(lines)} líneas al gateway")
-            
-            # Enviar líneas en batches con routing key específico
-            while total_sent < len(lines):
-                end_idx = min(total_sent + batch_size, len(lines))
-                batch_lines = lines[total_sent:end_idx]
-                
-                csv_batch = '\n'.join(batch_lines)
-                dto = TransactionBatchDTO(csv_batch, batch_type="RAW_CSV")
-                
-                # Enviar con routing key específico de la query
-                self.report_middleware.send(dto.to_bytes_fast(), routing_key=f'{query_name}.data')
-                
-                total_sent = end_idx
-                logger.info(f"{query_name}: Batch enviado {total_sent}/{len(lines)}")
-            
-            # Enviar EOF con routing key específico
-            eof_dto = TransactionBatchDTO(f"EOF:{query_name.upper()}", batch_type="EOF")
-            self.report_middleware.send(eof_dto.to_bytes_fast(), routing_key=f'{query_name}.eof')
-            
-            logger.info(f"{query_name}: Reporte enviado completo: {len(lines)} registros")
-            self.report_middleware.close()
-
-        except Exception as e:
-            logger.error(f"Error enviando reporte {query_name}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-
     def on_message_callback(self, ch, method, properties, body):
-        """Callback de RabbitMQ"""
+        """Callback para RabbitMQ cuando llega un mensaje."""
         try:
-            routing_key = method.routing_key
-            should_stop = self.process_message(body, routing_key)
+            routing_key = method.routing_key  # ✅ Obtener routing key
+            should_stop = self.process_message(body, routing_key)  # ✅ Pasar routing key
             
             if should_stop:
-                logger.info("Deteniendo consuming")
+                logger.info("Todos los reportes generados - deteniendo consuming")
                 ch.stop_consuming()
-                
         except Exception as e:
-            logger.error(f"Error en callback: {e}")
+            logger.error(f"Error en el callback de mensaje: {e}")
 
     def start(self):
-        """Inicia el ReportGenerator"""
+        """Inicia el ReportGenerator."""
         logger.info("Iniciando ReportGenerator...")
         
         try:
@@ -188,13 +78,79 @@ class ReportGenerator:
             self._cleanup()
 
     def _cleanup(self):
-        """Limpieza de recursos"""
         try:
+            # Cerrar cualquier archivo CSV abierto
+            for query_name in list(self.csv_files.keys()):
+                self._close_csv_file(query_name)
+            
             if self.input_middleware:
                 self.input_middleware.close()
                 logger.info("Conexión cerrada")
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
+
+    def _initialize_csv_file(self, query_name: str, sample_data: str):
+        """Inicializa el archivo CSV con headers."""
+        try:
+            reports_dir = './reports'
+            os.makedirs(reports_dir, exist_ok=True)
+            os.chmod(reports_dir, 0o755)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{reports_dir}/{query_name}_{timestamp}.csv"
+            
+            self.csv_files[query_name] = open(filename, 'w', encoding='utf-8')
+            
+            # Escribir header desde la primera línea del sample data
+            header_line = sample_data.strip().split('\n')[0]
+            self.csv_files[query_name].write(header_line + '\n')
+            self.csv_files[query_name].flush()
+            
+            logger.info(f"Archivo CSV inicializado: {filename}")
+
+        except Exception as e:
+            logger.error(f"Error inicializando el archivo CSV para {query_name}: {e}")
+            raise
+
+    def _write_to_csv(self, csv_data: str, query_name: str):
+        """Escribe datos al archivo CSV correspondiente."""
+        try:
+            # Inicializar archivo si no existe
+            if query_name not in self.csv_files:
+                self._initialize_csv_file(query_name, csv_data)
+            
+            # Escribir datos (skip header)
+            lines = csv_data.strip().split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Skip headers comunes
+                if any(header in line.lower() for header in ['transaction_id', 'year_half', 'store_name,birthdate']):
+                    continue
+                
+                self.csv_files[query_name].write(line + '\n')
+            
+            self.csv_files[query_name].flush()
+            
+            processed_lines = len([l for l in lines if l.strip() and not any(h in l.lower() for h in ['transaction_id', 'year_half', 'store_name,birthdate'])])
+            if processed_lines > 0:
+                logger.info(f"Escritas {processed_lines} líneas en archivo {query_name}")
+            
+        except Exception as e:
+            logger.error(f"Error escribiendo en CSV para {query_name}: {e}")
+            raise
+
+    def _close_csv_file(self, query_name: str):
+        """Cierra el archivo CSV para una query específica."""
+        try:
+            if query_name in self.csv_files:
+                self.csv_files[query_name].close()
+                logger.info(f"Archivo CSV cerrado para {query_name}")
+                del self.csv_files[query_name]
+        except Exception as e:
+            logger.error(f"Error cerrando el archivo CSV para {query_name}: {e}")
 
 
 if __name__ == "__main__":
