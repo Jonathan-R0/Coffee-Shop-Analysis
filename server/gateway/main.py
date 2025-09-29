@@ -25,7 +25,7 @@ def initialize_config():
         config_params["listener_backlog"] = int(os.getenv('SERVER_LISTEN_BACKLOG', config["DEFAULT"]["SERVER_LISTEN_BACKLOG"]))
         config_params["rabbitmq_host"] = os.getenv('RABBITMQ_HOST', config["DEFAULT"]["RABBITMQ_HOST"])
         config_params["output_queue"] = os.getenv('OUTPUT_QUEUE', config["DEFAULT"]["OUTPUT_QUEUE"])
-        config_params["reports_exchange"] = os.getenv('REPORTS_EXCHANGE', config.get("DEFAULT", "REPORTS_EXCHANGE", fallback=None))
+        config_params["reports_exchange"] = os.getenv('REPORT_EXCHANGE', config.get("DEFAULT", "REPORT_EXCHANGE", fallback=None))
         config_params["store_queue"] = os.getenv('STORE_EXCHANGE', config["DEFAULT"]["STORE_EXCHANGE"])
     except KeyError as e:
         raise KeyError("Key was not found. Error: {} .Aborting server".format(e))

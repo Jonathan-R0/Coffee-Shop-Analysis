@@ -53,7 +53,7 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       - OUTPUT_QUEUE=raw_data
-      - REPORTS_EXCHANGE=reports_exchange
+      - REPORT_EXCHANGE=reports_exchange
       - STORE_EXCHANGE=join.exchange
     volumes:
       - ./server/config.ini:/app/config.ini
@@ -292,6 +292,7 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       - INPUT_EXCHANGE=report.exchange
+      - REPORT_EXCHANGE=reports_exchange
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./reports:/app/reports

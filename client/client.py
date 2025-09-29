@@ -39,7 +39,7 @@ class Client:
             #"D": "/data/transactions_test",
             #"D": "/data/transaction_items",
             #"users": "/data/users",
-            "S": "/data/stores",
+            #"S": "/data/stores",
             #"menu_items": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
             #"vouchers": "/data/vouchers"
@@ -100,11 +100,8 @@ class Client:
     def _receive_report(self):
         """Recibe el reporte del servidor en batches y lo guarda."""
         try:
-            logger.info("Esperando reporte del servidor...")
-            
             # Crear directorio reports si no existe
             reports_dir = "/reports"
-            logger.info(f"Creando directorio: {reports_dir}")
             os.makedirs(reports_dir, exist_ok=True)
             
             # Verificar que se creó correctamente
@@ -119,16 +116,20 @@ class Client:
             batch_count = 0
             
             while True:
+                
                 # Recibir un mensaje del servidor
                 response = self.protocol._receive_single_message()
+                logger.info(f"Respuesta recibida: {response}")
                 
                 if response is None:
-                    logger.warning("Conexión cerrada por el servidor")
+                    logger.warning("Conexión cerrada por el servidor o response None")
                     # Si tenemos datos, guardarlos aunque no hayamos recibido EOF
                     if report_content:
                         logger.info(f"Guardando reporte incompleto con {batch_count} batches recibidos")
                         self._save_report(report_content, reports_dir)
                     break
+                
+                logger.info(f"Response.action: {response.action}, Response.data length: {len(response.data) if response.data else 0}")
                 
                 if response.action == "RPRT":
                     batch_count += 1
@@ -137,6 +138,12 @@ class Client:
                     # Agregar el contenido del batch
                     if response.data:
                         report_content.append(response.data)
+                        logger.info(f"Agregado batch {batch_count} al reporte. Total batches: {len(report_content)}")
+                    
+                    # Enviar ACK al servidor
+                    logger.info(f"Enviando ACK para batch {batch_count}...")
+                    self.protocol._send_ack(batch_count, 0)  # 0 = Success
+                    logger.info(f"ACK enviado para batch {batch_count}")
                         
                 elif response.action == "EOF":
                     logger.info(f"EOF recibido. Total batches: {batch_count}")
@@ -144,19 +151,22 @@ class Client:
                         self._save_report(report_content, reports_dir)
                     else:
                         logger.warning("EOF recibido pero no hay contenido del reporte")
+                    # No enviar ACK para EOF
                     break
                         
                 elif response.action == "ERRO":
                     logger.error(f"Error del servidor: {response.data}")
                     break
                 else:
-                    logger.warning(f"Mensaje inesperado del servidor: {response.action}")
+                    logger.warning(f"Mensaje inesperado del servidor: action={response.action}, data={response.data}")
                     
         except Exception as e:
             logger.error(f"Error recibiendo reporte: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _save_report(self, report_batches, reports_dir):
-        """Guarda el reporte completo combinando todos los batches."""
+        """Guarda el reporte completo combinando todos los batches y transformándolo a CSV."""
         try:
             logger.info(f"Iniciando guardado del reporte...")
             logger.info(f"Directorio destino: {reports_dir}")
@@ -171,16 +181,20 @@ class Client:
                 logger.error(f"No hay permisos de escritura en {reports_dir}")
                 return
             
-            # Combinar todos los batches
-            full_report = '\n'.join(report_batches)
-            logger.info(f"Reporte combinado - tamaño: {len(full_report)} caracteres")
+            # Combinar todos los batches en datos raw
+            raw_data = '\n'.join(report_batches)
+            logger.info(f"Datos raw combinados - tamaño: {len(raw_data)} caracteres")
+            
+            # Transformar a CSV
+            csv_content = self._convert_raw_data_to_csv(raw_data)
+            logger.info(f"Datos transformados a CSV - tamaño: {len(csv_content)} caracteres")
             
             # Guardar en archivo
             report_path = os.path.join(reports_dir, "query1.csv")
             logger.info(f"Intentando escribir archivo: {report_path}")
             
             with open(report_path, 'w', encoding='utf-8') as f:
-                f.write(full_report)
+                f.write(csv_content)
                 f.flush()  # Asegurar que se escriba inmediatamente
             
             # Verificar que el archivo se creó
@@ -192,16 +206,51 @@ class Client:
                 logger.error(f"El archivo no se creó: {report_path}")
             
             # Contar líneas para logging
-            lines = len(full_report.split('\n')) if full_report else 0
+            lines = len(csv_content.split('\n')) if csv_content else 0
             
             logger.info(f"Reporte guardado en {report_path}")
             logger.info(f"Total líneas en el reporte: {lines}")
-            logger.info(f"Tamaño del contenido: {len(full_report)} bytes")
+            logger.info(f"Tamaño del contenido: {len(csv_content)} bytes")
             
         except Exception as e:
             logger.error(f"Error guardando reporte: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+
+    def _convert_raw_data_to_csv(self, raw_data):
+        """Convierte los datos raw a formato CSV con headers."""
+        try:
+            logger.info("Iniciando conversión de datos raw a CSV")
+            
+            if not raw_data or not raw_data.strip():
+                logger.warning("Datos raw vacíos")
+                return "transaction_id,final_amount\n"
+            
+            lines = raw_data.strip().split('\n')
+            logger.info(f"Procesando {len(lines)} líneas de datos raw")
+            
+            # Agregar header CSV
+            csv_lines = ["transaction_id,final_amount"]
+            
+            valid_lines = 0
+            for line in lines:
+                line = line.strip()
+                if line:  # Solo procesar líneas no vacías
+                    csv_lines.append(line)
+                    valid_lines += 1
+            
+            logger.info(f"Agregadas {valid_lines} líneas válidas al CSV")
+            
+            result = '\n'.join(csv_lines)
+            logger.info(f"CSV generado con {len(csv_lines)} líneas totales (incluyendo header)")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error convirtiendo datos raw a CSV: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return "transaction_id,final_amount\nERROR,0"
     
     def _cleanup(self):
         """Limpieza de recursos al finalizar."""

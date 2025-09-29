@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Dict, List
 from rabbitmq.middleware import MessageMiddlewareExchange
-from dtos.dto import TransactionBatchDTO, StoreBatchDTO, BatchType
+from dtos import TransactionBatchDTO, StoreBatchDTO, BatchType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

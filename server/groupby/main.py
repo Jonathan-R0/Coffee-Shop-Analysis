@@ -3,7 +3,7 @@ import os
 from collections import defaultdict
 from typing import Dict, Tuple
 from rabbitmq.middleware import MessageMiddlewareExchange
-from dtos.dto import TransactionBatchDTO, BatchType
+from dtos import TransactionBatchDTO, BatchType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

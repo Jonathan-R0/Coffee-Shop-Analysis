@@ -8,7 +8,7 @@ from common.protocol import Protocol, ProtocolMessage
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dataclasses import asdict
 from logger import get_logger
-from dtos.dto import TransactionBatchDTO, BatchType, StoreBatchDTO
+from dtos    import TransactionBatchDTO, BatchType, StoreBatchDTO
 
 logger = get_logger(__name__)
 
@@ -26,19 +26,26 @@ class Gateway:
             exchange_name=store_exchange,
             route_keys=['stores.data', 'stores.eof']
         )
+        
+        self.report_middleware = MessageMiddlewareExchange(
+            host=rabbitmq_host,
+            exchange_name=self._reports_exchange,
+            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof']
+        )
 
     def handle_connection(self, client_sock):
         """Maneja una conexión entrante."""
         logger.info(f"Conexión aceptada desde {client_sock.getpeername()}")
         protocol = Protocol(client_sock)
 
+        should_send_report = False
+        
         try:
             for message in protocol.receive_messages():
                 logger.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
 
                 if message.action == "EXIT":
-                    self._wait_and_send_report(protocol)
-
+                    should_send_report = True
                     break
                 
                 elif message.action == "FINI": 
@@ -58,6 +65,13 @@ class Gateway:
         except Exception as e:
             logger.error(f"Error procesando conexión: {e}")
         finally:
+            # Enviar reporte si fue solicitado después del ACK
+            if should_send_report:
+                self._wait_and_send_report(protocol)
+                # Dar tiempo para que el cliente reciba el reporte completo
+                import time
+                time.sleep(2)
+                
             protocol.close()
             logger.info(f"Conexión cerrada con {client_sock.getpeername()}")
             
@@ -115,97 +129,113 @@ class Gateway:
 
     def _wait_and_send_report(self, protocol):
         """
-        Espera por el reporte del report generator y lo envía al cliente.
+        Espera por reportes del report generator y los envía al cliente tan pronto como estén listos.
         """
         try:
-            logger.info("Esperando reporte del pipeline...")
+            logger.info("Esperando reportes del pipeline...")
             
-            # Crear middleware para recibir reportes
-            report_middleware = MessageMiddlewareQueue(
-                host=self._middleware.host,
-                queue_name="report_queue"
-            )
-            
-            # Recibir batches del reporte
-            report_transactions = []
+            # Acumuladores para cada reporte
+            q1_transactions = []
+            q3_transactions = []
+            eof_received = set()
+            reports_sent = set()
             
             def report_callback(ch, method, properties, body):
+                nonlocal eof_received, reports_sent
+                
                 try:
-                    # Usar DTO para procesar el mensaje
                     dto = TransactionBatchDTO.from_bytes_fast(body)
+                    routing_key = method.routing_key
                     
-                    if dto.batch_type == "EOF":
-                        logger.info("EOF del reporte recibido")
-                        # Detener consumo cuando recibimos EOF
-                        report_middleware.stop_consuming()
-                        return
-                    elif dto.batch_type == "DATA":  
-                        # Agregar transacciones del batch
-                        report_transactions.extend(dto.transactions)
-                        logger.info(f"Batch del reporte recibido: {len(dto.transactions)} transacciones")
-                    elif dto.batch_type == "RAW_CSV":
-                        # Procesar CSV raw del reporte (ya viene con transaction_id,final_amount)
-                        lines = dto.transactions.strip().split('\n')
-                        for line in lines:
-                            if line.strip():
-                                values = line.split(',')
-                                if len(values) >= 2:
-                                    report_transactions.append({
-                                        "transaction_id": values[0],
-                                        "final_amount": values[1]
-                                    })
-                        logger.info(f"Batch CSV del reporte procesado: {len(lines)} líneas")
+                    logger.info(f"Recibido mensaje con routing_key: {routing_key}, batch_type: {dto.batch_type}")
+                    
+                    # Detectar EOF y enviar reporte inmediatamente si está listo
+                    if dto.batch_type == BatchType.EOF:
+                        logger.info(f"Procesando EOF para routing_key: {routing_key}")
+                        if routing_key == "q1.eof":
+                            eof_received.add("q1")
+                            logger.info("EOF recibido para Q1")
+                            
+                            # Enviar Q1 inmediatamente
+                            if "q1" not in reports_sent and q1_transactions:
+                                raw_q1_data = '\n'.join(q1_transactions)
+                                self._send_report_via_protocol(protocol, raw_q1_data, "Q1")
+                                reports_sent.add("q1")
+                                logger.info(f"Reporte Q1 enviado inmediatamente: {len(q1_transactions)} chunks")
+                            else:
+                                logger.warning(f"Q1 no enviado: ya enviado={'q1' in reports_sent}, chunks_vacios={not q1_transactions}")
+                            
+                        elif routing_key == "q3.eof":
+                            eof_received.add("q3")
+                            logger.info("EOF recibido para Q3")
+                            
+                            # Enviar Q3 inmediatamente
+                            if "q3" not in reports_sent and q3_transactions:
+                                raw_q3_data = '\n'.join(q3_transactions)
+                                self._send_report_via_protocol(protocol, raw_q3_data, "Q3")
+                                reports_sent.add("q3")
+                                logger.info(f"Reporte Q3 enviado inmediatamente: {len(q3_transactions)} chunks")
+                        
+                        # Solo terminar cuando tengamos ambos EOFs, no solo Q1
+                        if "q1" in eof_received and "q3" in eof_received:
+                            logger.info("Ambos reportes procesados completamente")
+                            self.report_middleware.stop_consuming()
+                            return
+                        
+                        # Continuar escuchando si solo tenemos uno de los dos
+                        if "q1" in eof_received:
+                            logger.info("Q1 procesado, continuando escucha para Q3...")
+                        elif "q3" in eof_received:
+                            logger.info("Q3 procesado, continuando escucha para Q1...")
+                        
+                        # No hacer return aquí para seguir escuchando
+                    
+                    # Procesar datos según routing key - solo acumular datos sin transformar
+                    elif dto.batch_type == BatchType.RAW_CSV:
+                        if routing_key == "q1.data":
+                            q1_transactions.append(dto.data)
+                        elif routing_key == "q3.data":
+                            q3_transactions.append(dto.data)
+                        
+                        logger.info(f"Batch procesado: Q1 chunks={len(q1_transactions)}, Q3 chunks={len(q3_transactions)}")
                     
                 except Exception as e:
                     logger.error(f"Error procesando batch del reporte: {e}")
             
-            # Consumir batches hasta recibir EOF
-            report_middleware.start_consuming(report_callback)
+            # Consumir batches
+            self.report_middleware.start_consuming(report_callback)
             
-            # Una vez que terminamos, convertir y enviar al cliente
-            if report_transactions:
-                csv_content = self._convert_transactions_to_csv(report_transactions)
-                self._send_report_via_protocol(protocol, csv_content)
-                logger.info(f"Reporte enviado al cliente: {len(report_transactions)} transacciones")
-            else:
-                logger.warning("No se recibieron transacciones del reporte")
-                self._send_error_to_client(protocol, "No report data received")
-                
-            report_middleware.close()
-                
-        except Exception as e:
-            logger.error(f"Error esperando reporte: {e}")
-            self._send_error_to_client(protocol, f"Error processing report: {e}")
-
-    def _convert_transactions_to_csv(self, transactions):
-        """
-        Convierte lista de transacciones a formato CSV.
-        """
-        try:
-            # Crear CSV
-            csv_lines = ["transaction_id,final_amount"]
-            for transaction in transactions:
-                csv_lines.append(f"{transaction['transaction_id']},{transaction['final_amount']}")
+            # Verificar si hay reportes que no se enviaron (por si acaso)
+            if "q1" not in reports_sent and q1_transactions:
+                raw_q1_data = '\n'.join(q1_transactions)
+                self._send_report_via_protocol(protocol, raw_q1_data, "Q1")
+                logger.info(f"Reporte Q1 enviado al final: {len(q1_transactions)} chunks")
             
-            return '\n'.join(csv_lines)
+            if "q3" not in reports_sent and q3_transactions:
+                raw_q3_data = '\n'.join(q3_transactions)
+                self._send_report_via_protocol(protocol, raw_q3_data, "Q3")
+                logger.info(f"Reporte Q3 enviado al final: {len(q3_transactions)} chunks")
+            
+            self.report_middleware.close()
+            logger.info("Todos los reportes han sido enviados")
+            
         except Exception as e:
-            logger.error(f"Error convirtiendo transacciones a CSV: {e}")
-            return "transaction_id,final_amount\nERROR,0"
+            logger.error(f"Error esperando reportes: {e}")
+            self._send_error_to_client(protocol, f"Error processing reports: {e}")
 
-    def _send_report_via_protocol(self, protocol, csv_content):
-        """
-        Envía el reporte usando el protocolo existente en batches.
-        """
+    def _send_report_via_protocol(self, protocol, content, report_name="RPRT"):
+        """Envía un reporte usando el protocolo existente."""
         try:
-            # Usar el método de batches del protocolo para enviar respuesta
-            success = protocol.send_response_batches("RPRT", "R", csv_content)
+            # Limpiar buffer antes de enviar reporte
+            protocol._flush_socket_buffer()
+            
+            success = protocol.send_response_batches("RPRT", "R", content)
             if success:
-                logger.info(f"Reporte enviado exitosamente en batches: {len(csv_content)} bytes")
+                logger.info(f"Reporte {report_name} enviado exitosamente: {len(content)} bytes")
             else:
-                logger.error("Error enviando reporte en batches")
-            
+                logger.error(f"Error enviando reporte {report_name}")
         except Exception as e:
-            logger.error(f"Error enviando reporte via protocolo: {e}")
+            logger.error(f"Error enviando reporte {report_name}: {e}")
 
     def _send_error_to_client(self, protocol, error_message):
         """

@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from rabbitmq.middleware import MessageMiddlewareQueue,MessageMiddlewareExchange
 from filter_factory import FilterStrategyFactory
-from dtos.dto import TransactionBatchDTO, BatchType
+from dtos import TransactionBatchDTO, BatchType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
