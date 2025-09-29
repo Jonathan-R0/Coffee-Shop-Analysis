@@ -1,10 +1,9 @@
 import logging
 import os
-import json
-import csv
 from datetime import datetime
+
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
-from dtos.dto import TransactionBatchDTO
+from dtos.dto import TransactionBatchDTO, BatchType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,25 +14,25 @@ class ReportGenerator:
         self.input_queue = os.getenv('INPUT_QUEUE', 'final_data')
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'reports_exchange')
         self.query_type = os.getenv('QUERY_TYPE', 'query1')
+        self.report_exchange = os.getenv('REPORT_EXCHANGE', 'report.exchange')
+
         
-        self.input_middleware = MessageMiddlewareQueue(
-            host=self.rabbitmq_host, 
-            queue_name=self.input_queue
+        self.input_middleware = MessageMiddlewareExchange(
+            host=self.rabbitmq_host,
+            exchange_name=self.report_exchange,
+            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof']
         )
         
-        self.items_processed = []
-        self.csv_file = None
-        self.csv_writer = None
+        self.csv_files = {}  # Para múltiples archivos
+        self.eof_received = set()  # Tracking de EOF
         
         logger.info(f"ReportGenerator inicializado:")
         logger.info(f"  Queue entrada: {self.input_queue}")
         logger.info(f"  Exchange salida: {self.output_exchange}")
         logger.info(f"  Tipo de query: {self.query_type}")
+        logger.info(f"  Exchange: {self.report_exchange}")
 
-    def process_message(self, message: bytes):
-        """
-        Procesa un batch de transacciones o una señal de control.
-        """
+    def process_message(self, message: bytes, routing_key: str):
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
 
@@ -81,54 +80,50 @@ class ReportGenerator:
             logger.info(f"Reporte CSV guardado en: {filename}")
 
         except Exception as e:
-            logger.error(f"Error guardando reporte CSV: {e}")
+            logger.error(f"Error procesando mensaje: {e}")
+            return False
 
     def on_message_callback(self, ch, method, properties, body):
-        """
-        Callback para RabbitMQ cuando llega un mensaje.
-        """
+        """Callback para RabbitMQ cuando llega un mensaje."""
         try:
-            self.process_message(body)  
+            routing_key = method.routing_key  # ✅ Obtener routing key
+            should_stop = self.process_message(body, routing_key)  # ✅ Pasar routing key
+            
+            if should_stop:
+                logger.info("Todos los reportes generados - deteniendo consuming")
+                ch.stop_consuming()
         except Exception as e:
             logger.error(f"Error en el callback de mensaje: {e}")
 
     def start(self):
-        """
-        Inicia el ReportGenerator.
-        """
+        """Inicia el ReportGenerator."""
         logger.info("Iniciando ReportGenerator...")
-        logger.info(f"Consumiendo de: {self.input_queue}")
         
         try:
-            self._initialize_csv_file()  
             self.input_middleware.start_consuming(self.on_message_callback)
         except KeyboardInterrupt:
             logger.info("ReportGenerator detenido manualmente")
         except Exception as e:
             logger.error(f"Error durante el consumo: {e}")
         finally:
-            self._close_csv_file()  
             self._cleanup()
 
     def _cleanup(self):
         try:
+            # Cerrar cualquier archivo CSV abierto
+            for query_name in list(self.csv_files.keys()):
+                self._close_csv_file(query_name)
+            
             if self.input_middleware:
                 self.input_middleware.close()
                 logger.info("Conexión cerrada")
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
 
-    def _initialize_csv_file(self):
-        """
-        Inicializa el archivo CSV y escribe los encabezados.
-        """
-        # Ya no necesitamos archivo CSV local - solo enviamos al exchange
-        logger.info("ReportGenerator inicializado para envío via exchange")
 
-    def _write_to_csv(self, transactions):
-        """
-        Escribe las transacciones en el archivo CSV, incluyendo solo las columnas necesarias.
-        """
+
+    def _write_to_csv(self, csv_data: str, query_name: str):
+        """Escribe datos al archivo CSV correspondiente."""
         try:
             # Recopilar todas las transacciones para ordenar
             transaction_records = []
@@ -257,12 +252,13 @@ class ReportGenerator:
         Cierra el archivo CSV si está abierto.
         """
         try:
-            if hasattr(self, 'csv_file') and self.csv_file:
-                self.csv_file.close()
-                os.chmod(self.csv_filename, 0o644)
-                logger.info(f"Archivo CSV cerrado: {self.csv_filename}")
+            if query_name in self.csv_files:
+                self.csv_files[query_name].close()
+                logger.info(f"Archivo CSV cerrado para {query_name}")
+                del self.csv_files[query_name]
         except Exception as e:
-            logger.error(f"Error cerrando el archivo CSV: {e}")
+            logger.error(f"Error cerrando el archivo CSV para {query_name}: {e}")
+
 
 if __name__ == "__main__":
     report_generator = ReportGenerator()

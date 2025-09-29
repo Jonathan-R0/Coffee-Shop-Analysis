@@ -1,207 +1,226 @@
 import logging
 import os
 from collections import defaultdict
-from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
-from dtos.dto import TransactionBatchDTO
+from typing import Dict, Tuple
+from rabbitmq.middleware import MessageMiddlewareExchange
+from dtos.dto import TransactionBatchDTO, BatchType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+    
+class TPVAggregation:
+    """Clase para manejar el Total Payment Value (TPV) por tienda y semestre."""
+    
+    def __init__(self):
+        self.total_payment_value = 0.0
+        self.transaction_count = 0
+    
+    def add_transaction(self, final_amount: float):
+        """Agrega una transacción al TPV."""
+        self.total_payment_value += final_amount
+        self.transaction_count += 1
+    
+    def to_csv_line(self, year_half: str, store_id: str) -> str:
+        """Convierte la agregación a una línea CSV."""
+        return f"{year_half},{store_id},{self.total_payment_value:.2f},{self.transaction_count}"
+
+
 class GroupByNode:
+    """
+    Nodo para calcular TPV por semestre y tienda.
+    Los datos ya vienen filtrados por año (2024-2025) y hora (06:00-23:00).
+    """
+    
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
-        
-        self.input_queue = os.getenv('INPUT_QUEUE', 'filter.groupby')
-        self.output_queue_most_sold = os.getenv('OUTPUT_QUEUE_MOST_SOLD', 'groupby.aggregator.most_sold')
-        self.output_queue_most_profitable = os.getenv('OUTPUT_QUEUE_MOST_PROFITABLE', 'groupby.aggregator.most_profitable')
-        self.output_queue_semester = os.getenv('OUTPUT_QUEUE_SEMESTER', 'groupby.join.semester')
-        self.input_q3 = os.getenv('INPUT_Q3', 'groupby.join.exchange')
-
-        
-        self.semester = os.getenv('SEMESTER', None)
-        if self.semester not in ['1', '2']:
-            raise ValueError("SEMESTER must be '1' or '2'")
+        self.input_exchange = os.getenv('INPUT_Q3', 'groupby.join.exchange')
+        self.join_exchange_q3 = os.getenv('JOIN_EXCHANGE', 'join.exchange')
+        self.semester = self._validate_semester()
         
         self.input_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
-            exchange_name=self.input_q3,
-            route_keys=[f'semester.{self.semester}']
+            exchange_name=self.input_exchange,
+            route_keys=[f'semester.{self.semester}', 'eof.all'] 
         )
-        
-        logger.info(f"GroupByNode initialized:")
-        logger.info(f"  Queue entrada: {self.input_q3}")
-        logger.info(f"  Semester: {self.semester}")
-    @staticmethod
-    def get_month_from_csv_line(line):
-        """Extract month from CSV line - OPTIMIZED version"""
-        # CSV format: transaction_id,store_id,payment_method_id,voucher_id,user_id,original_amount,discount_applied,final_amount,created_at
-        fields = line.split(',')
-        if len(fields) >= 9:
-            date_str = fields[8]  # created_at is the 9th field (index 8)
-            return int(date_str[5:7])  # Extract month from YYYY-MM-DD format
-        return None
 
-    @staticmethod
-    def get_year_from_csv_line(line):
-        """Extract year from CSV line - OPTIMIZED version"""
-        fields = line.split(',')
-        if len(fields) >= 9:
-            date_str = fields[8]  # created_at is the 9th field (index 8)
-            return int(date_str[0:4])  # Extract year from YYYY-MM-DD format
-        return None
+        self.join_exchange_middleware = MessageMiddlewareExchange(
+            host=self.rabbitmq_host,
+            exchange_name=self.join_exchange_q3,
+            route_keys=['tpv.data', 'tpv.eof']
+        )
 
-    @staticmethod
-    def get_semester_from_csv_line(line):
-        """Extract semester from CSV line - OPTIMIZED version"""
-        month = GroupByNode.get_month_from_csv_line(line)
-        if month:
-            return 1 if month <= 6 else 2
-        return None
-
-    @staticmethod
-    def get_store_id_from_csv_line(line):
-        """Extract store_id from CSV line - OPTIMIZED version"""
-        fields = line.split(',')
-        if len(fields) >= 2:
-            return fields[1]  # store_id is the 2nd field (index 1)
-        return None
-
-    def group_by_month_item_csv(self, csv_data):
-        """
-        OPTIMIZED: Groups CSV data by month and item_id without creating Python objects.
-        For Query 2: groups by month for aggregation.
-        """
-        grouped = defaultdict(list)
-        lines = csv_data.strip().split('\n')
+        self.tpv_aggregations: Dict[Tuple[str, str], TPVAggregation] = defaultdict(TPVAggregation)
         
-        for line in lines:
-            if not line.strip():
-                continue
-            month = self.get_month_from_csv_line(line)
-            if month:
-                # For transactions, we group by month only since there's no item_id
-                # The aggregator will need to handle the lack of item_id
-                grouped[month].append(line)
+        self.dto_helper = TransactionBatchDTO("", BatchType.RAW_CSV)
         
-        return grouped
-
-    def group_by_semester_year_store_csv(self, csv_data):
-        """
-        OPTIMIZED: Groups CSV data by semester, year, and store without creating Python objects.
-        For Query 3: groups by semester, year, and store.
-        """
-        grouped = defaultdict(list)
-        lines = csv_data.strip().split('\n')
-        
-        for line in lines:
-            if not line.strip():
-                continue
-            semester = self.get_semester_from_csv_line(line)
-            year = self.get_year_from_csv_line(line)
-            store_id = self.get_store_id_from_csv_line(line)
-            
-            if semester and year and store_id:
-                key = (semester, year, store_id)
-                grouped[key].append(line)
-        
-        return grouped
+        logger.info(f"GroupByNode inicializado:")
+        logger.info(f"  Exchange: {self.input_exchange}")
+        logger.info(f"  Semestre: {self.semester}")
+        logger.info(f"  Calculando TPV por semestre y tienda")
     
-    def group_by_year_store_csv(self, csv_data):
+    def _validate_semester(self) -> str:
+        """Valida y retorna el semestre configurado."""
+        semester = os.getenv('SEMESTER')
+        if semester not in ['1', '2']:
+            raise ValueError("SEMESTER debe ser '1' o '2'")
+        return semester
+    
+    def _extract_transaction_data(self, csv_line: str) -> Tuple[str, str, float]:
         """
-        Groups CSV data by year and store_id.
-        Semester is implicit (already filtered by routing).
-        """
-        grouped = defaultdict(list)
-        lines = csv_data.strip().split('\n')
+        Extrae datos necesarios de una línea CSV usando el DTO helper.
         
-        for line in lines:
-            if not line.strip():
+        Returns:
+            Tuple[year_half, store_id, final_amount]
+        """
+        try:
+            store_id = self.dto_helper.get_column_value(csv_line, 'store_id')
+            created_at = self.dto_helper.get_column_value(csv_line, 'created_at')
+            final_amount_str = self.dto_helper.get_column_value(csv_line, 'final_amount')
+            
+            if not all([store_id, created_at, final_amount_str]):
+                return None, None, None
+            
+            year = created_at[:4]  
+            year_half = f"{year}-H{self.semester}"
+            final_amount = float(final_amount_str)
+            
+            return year_half, store_id, final_amount
+            
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Error extrayendo datos de línea: {e}")
+            return None, None, None
+    
+    def _process_csv_batch(self, csv_data: str):
+        """
+        Procesa un batch de datos CSV y actualiza las agregaciones de TPV.
+        Los datos ya vienen filtrados, solo necesitamos agrupar y sumar.
+        """
+        processed_count = 0
+        
+        for line in csv_data.split('\n'):
+            line = line.strip()
+            if not line:
                 continue
             
-            year = self.get_year_from_csv_line(line)
-            store_id = self.get_store_id_from_csv_line(line)
+            year_half, store_id, final_amount = self._extract_transaction_data(line)
             
-            if year and store_id:
-                key = (year, store_id)
-                grouped[key].append(line)
+            if year_half and store_id and final_amount is not None:
+                key = (year_half, store_id)
+                self.tpv_aggregations[key].add_transaction(final_amount)
+                processed_count += 1
         
-        return grouped
-
-    def process_message(self, message: bytes):
+        if processed_count > 0:
+            logger.info(f"Procesadas {processed_count} transacciones. "
+                       f"Total grupos (year_half, store_id): {len(self.tpv_aggregations)}")
+    
+    def _generate_results_csv(self) -> str:
         """
-        Processes transactions and groups by year and store_id.
+        Genera el CSV con los resultados de TPV por semestre y tienda.
+        
+        Returns:
+            str: CSV con headers y datos de TPV agregados
+        """
+        if not self.tpv_aggregations:
+            logger.warning("No hay datos para generar resultados")
+            return "year_half_created_at,store_id,total_payment_value,transaction_count"
+        
+        csv_lines = ["year_half_created_at,store_id,total_payment_value,transaction_count"]
+        
+        # Ordenar por year_half y luego por store_id para consistencia
+        sorted_keys = sorted(self.tpv_aggregations.keys())
+        
+        for (year_half, store_id) in sorted_keys:
+            aggregation = self.tpv_aggregations[(year_half, store_id)]
+            csv_lines.append(aggregation.to_csv_line(year_half, store_id))
+        
+        logger.info(f"Resultados TPV generados para {len(self.tpv_aggregations)} grupos")
+        return '\n'.join(csv_lines)
+    
+    def _handle_eof_message(self) -> bool:
+        try:
+            logger.info("EOF recibido. Generando resultados finales de TPV")
+            
+            results_csv = self._generate_results_csv()
+            
+            result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
+            self.join_exchange_middleware.send(
+                result_dto.to_bytes_fast(), 
+                routing_key='tpv.data'
+            )
+            
+            eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+            self.join_exchange_middleware.send(
+                eof_dto.to_bytes_fast(), 
+                routing_key='tpv.eof'
+            )
+            
+            logger.info("Resultados TPV enviados al join node")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error manejando EOF: {e}")
+            return False
+    
+    def process_message(self, message: bytes) -> bool:
+        """
+        Procesa un mensaje de la cola.
+        
+        Args:
+            message: Mensaje binario recibido
+            
+        Returns:
+            bool: True si debe terminar el consuming, False para continuar
         """
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
-
-            if dto.batch_type == "CONTROL":
-                logger.info(f"CONTROL signal received (semester {self.semester})")
-                #self.output_middleware.send(message)
-                return
-
-            input_lines = len(dto.transactions.split('\n')) if dto.transactions else 0
             
-            if not dto.transactions.strip():
-                logger.info(f"Empty batch received")
-                return
-
-            grouped = self.group_by_year_store_csv(dto.transactions)
-            total_output_lines = 0
+            if dto.batch_type == BatchType.EOF:
+                return self._handle_eof_message()
             
-            for (year, store_id), lines in grouped.items():
-                if not lines:
-                    continue
-                
-                
-                #grouped_dto = TransactionBatchDTO(csv_with_metadata, batch_type="GROUPED")
-                #serialized_data = grouped_dto.to_bytes_fast()
-                
-                logger.info(f"Semester {self.semester}, Year {year}, Store {store_id}: {len(lines)} lines grouped")
+            if dto.batch_type == BatchType.RAW_CSV:
+                self._process_csv_batch(dto.data)
+            
+            return False
             
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
-
+            logger.error(f"Error procesando mensaje: {e}")
+            return False
+    
     def on_message_callback(self, ch, method, properties, body):
-        """
-        Callback for RabbitMQ when a message arrives.
-        """
+        """Callback para RabbitMQ cuando llega un mensaje."""
         try:
-            self.process_message(body)
+            should_stop = self.process_message(body)
+            if should_stop:
+                logger.info("EOF procesado - deteniendo consuming")
+                ch.stop_consuming()
         except Exception as e:
-            logger.error(f"Error in callback: {e}")
-
+            logger.error(f"Error en callback: {e}")
+    
     def start(self):
+        """Inicia el nodo de agrupación TPV."""
         try:
+            logger.info("Iniciando GroupByNode para cálculo de TPV...")
             self.input_middleware.start_consuming(self.on_message_callback)
         except KeyboardInterrupt:
-            logger.info("GroupByNode stopped manually")
+            logger.info("GroupByNode detenido manualmente")
         except Exception as e:
-            logger.error(f"Error during consumption: {e}")
+            logger.error(f"Error durante el consumo: {e}")
             raise
         finally:
             self._cleanup()
-
+    
     def _cleanup(self):
+        """Limpia recursos al finalizar."""
         try:
             if self.input_middleware:
                 self.input_middleware.close()
-                logger.info("Input connection closed")
-                
-            if self.output_middleware_most_sold:
-                self.output_middleware_most_sold.close()
-                logger.info("Most sold output connection closed")
-                
-            if self.output_middleware_most_profitable:
-                self.output_middleware_most_profitable.close()
-                logger.info("Most profitable output connection closed")
-                
-            if self.output_middleware_semester:
-                self.output_middleware_semester.close()
-                logger.info("Semester output connection closed")
-                
+                logger.info("Conexión cerrada")
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            logger.error(f"Error durante cleanup: {e}")
+
 
 if __name__ == "__main__":
     node = GroupByNode()
     node.start()
+    
