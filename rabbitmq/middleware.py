@@ -91,6 +91,8 @@ class MessageMiddlewareExchange(MessageMiddleware):
                     delivery_mode=1
                 )
             )
+        except MessageMiddlewareDisconnectedError:
+            raise  # Re-raise the disconnection error as-is
         except Exception as e:
             logger.error(f"Error enviando mensaje: {e}")
             raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")
@@ -122,6 +124,8 @@ class MessageMiddlewareExchange(MessageMiddleware):
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Conexión con RabbitMQ perdida: {e}")
             raise MessageMiddlewareDisconnectedError("Conexión con RabbitMQ perdida")
+        except MessageMiddlewareDisconnectedError:
+            raise  # Re-raise the disconnection error as-is
         except Exception as e:
             logger.error(f"Error durante el consumo de mensajes: {e}")
             raise MessageMiddlewareMessageError(f"Error durante el consumo de mensajes: {e}")
@@ -197,6 +201,8 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 )
             )
             # Mensaje publicado (log activado para debug)
+        except MessageMiddlewareDisconnectedError:
+            raise  # Re-raise the disconnection error as-is
         except Exception as e:
             logger.error(f"Error enviando mensaje: {e}")
             raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")
@@ -219,6 +225,8 @@ class MessageMiddlewareQueue(MessageMiddleware):
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Conexión con RabbitMQ perdida: {e}")
             raise MessageMiddlewareDisconnectedError("Conexión con RabbitMQ perdida")
+        except MessageMiddlewareDisconnectedError:
+            raise  # Re-raise the disconnection error as-is
         except Exception as e:
             logger.error(f"Error durante el consumo de mensajes: {e}")
             raise MessageMiddlewareMessageError(f"Error durante el consumo de mensajes: {e}")
