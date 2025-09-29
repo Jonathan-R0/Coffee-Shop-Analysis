@@ -66,7 +66,9 @@ class MessageMiddlewareExchange(MessageMiddleware):
 
     def _connect(self):
         try:
-            self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.host))
+            credentials = pika.PlainCredentials('admin', 'admin')
+            parameters = pika.ConnectionParameters(host=self.host, credentials=credentials)
+            self.connection = pika.BlockingConnection(parameters)
             self.channel = self.connection.channel()
             self.channel.exchange_declare(exchange=self.exchange_name, exchange_type='topic', durable=True)
             logger.info(f"Conectado a RabbitMQ. Exchange declarado: {self.exchange_name}")
@@ -172,7 +174,9 @@ class MessageMiddlewareQueue(MessageMiddleware):
 
     def _connect(self):
         try:
-            self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.host))
+            credentials = pika.PlainCredentials('admin', 'admin')
+            parameters = pika.ConnectionParameters(host=self.host, credentials=credentials)
+            self.connection = pika.BlockingConnection(parameters)
             self.channel = self.connection.channel()
             self.channel.queue_declare(queue=self.queue_name, durable=True)  # Cola persistente
             logger.info(f"Conectado a RabbitMQ. Cola declarada: {self.queue_name}")

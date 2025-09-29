@@ -190,15 +190,6 @@ class Protocol:
             logger.error(f"Error parsing message: {e}")
             return None
 
-    def parse_batch_lines(self, message: ProtocolMessage) -> List[str]:
-        """Parsea las líneas del batch desde un mensaje recibido."""
-        if not message.data.strip():
-            return []
-
-        # Dividir el contenido del mensaje en líneas
-        lines = message.data.strip().split('\n')
-        return lines
-
     # -------------------- COMMON METHODS --------------------
 
     def _receive_ack(self) -> Optional[AckResponse]:
@@ -227,6 +218,96 @@ class Protocol:
         except Exception as e:
             logger.error(f"Error recibiendo ACK: {e}")
             return None
+
+    def send_response_message(self, action: str, file_type: str, data: str, is_last_batch: bool = True) -> bool:
+        """Envía un mensaje de respuesta del servidor al cliente (como un reporte)."""
+        try:
+            message_size = len(data) if data else 0
+            
+            if message_size > MAX_MESSAGE_SIZE:
+                logger.error(f"Mensaje de respuesta demasiado largo: {message_size} bytes")
+                return False
+            
+            # Crear el mensaje: [ACTION(4)] + [FILE-TYPE(1)] + [SIZE(4)] + [LAST-BATCH(1)] + [DATA(N)]
+            message = bytearray()
+            
+            # ACTION (4 bytes, padded with nulls)
+            message.extend(action.ljust(4, '\x00').encode('utf-8'))
+            
+            # FILE-TYPE (1 byte)
+            message.extend(file_type.encode('utf-8'))
+            
+            # SIZE (4 bytes, big endian)
+            message.extend(struct.pack('>I', message_size))
+            
+            # LAST-BATCH (1 byte)
+            message.extend(struct.pack('B', 1 if is_last_batch else 0))
+            
+            # DATA (N bytes)
+            if data:
+                message.extend(data.encode('utf-8'))
+            
+            # Enviar el mensaje
+            success = self._send_all(bytes(message))
+            
+            if success:
+                logger.info(f"Mensaje de respuesta enviado: action={action}, file_type={file_type}, size={message_size}, last_batch={is_last_batch}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error enviando mensaje de respuesta: {e}")
+            return False
+
+    def send_response_batches(self, action: str, file_type: str, data: str, max_lines_per_batch: int = 150) -> bool:
+        """Envía un mensaje de respuesta grande dividido en batches por líneas, terminando con EOF."""
+        try:
+            if not data:
+                # Si no hay datos, enviar solo EOF
+                return self.send_response_message("EOF", "R", "EOF:1", is_last_batch=True)
+            
+            # Dividir el CSV en líneas
+            lines = data.strip().split('\n')
+            total_lines = len(lines)
+            
+            if total_lines == 0:
+                return self.send_response_message("EOF", "R", "EOF:1", is_last_batch=True)
+            
+            lines_sent = 0
+            batch_number = 1
+            
+            # Enviar todos los batches de datos (nunca last_batch=True)
+            while lines_sent < total_lines:
+                # Calcular las líneas del batch actual
+                end_line = min(lines_sent + max_lines_per_batch, total_lines)
+                batch_lines = lines[lines_sent:end_line]
+                batch_content = '\n'.join(batch_lines)
+                
+                # Verificar que el batch no sea demasiado grande
+                if len(batch_content) > MAX_MESSAGE_SIZE:
+                    logger.error(f"Batch {batch_number} demasiado grande: {len(batch_content)} bytes")
+                    return False
+                
+                # Enviar batch (siempre is_last_batch=False para datos)
+                if not self.send_response_message(action, file_type, batch_content, is_last_batch=False):
+                    logger.error(f"Error enviando batch {batch_number}")
+                    return False
+                
+                lines_sent = end_line
+                logger.info(f"Batch {batch_number} enviado: {len(batch_lines)} líneas ({lines_sent}/{total_lines} líneas totales)")
+                batch_number += 1
+            
+            # Enviar mensaje EOF al final
+            if not self.send_response_message("EOF", "R", "EOF:1", is_last_batch=True):
+                logger.error("Error enviando mensaje EOF")
+                return False
+            
+            logger.info(f"Reporte completo enviado en {batch_number-1} batches + EOF: {total_lines} líneas totales")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error enviando respuesta en batches: {e}")
+            return False
 
     def _send_ack(self, batch_id: int, status: int):
         """Envía un ACK al cliente."""

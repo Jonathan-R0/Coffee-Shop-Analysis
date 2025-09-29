@@ -16,7 +16,10 @@ def base_services_setup(f):
         "      test: [\"CMD\", \"rabbitmq-diagnostics\", \"ping\"]\n"
         "      interval: 10s\n"
         "      timeout: 5s\n"
-        "      retries: 10\n\n"
+        "      retries: 10\n"
+        "    environment:\n"
+        "      - RABBITMQ_DEFAULT_USER=admin\n"
+        "      - RABBITMQ_DEFAULT_PASS=admin\n\n"
         
         "  client:\n"
         "    build:\n"
@@ -38,7 +41,8 @@ def base_services_setup(f):
         "      - ./data/payment_methods:/data/payment_methods\n"
         "      - ./data/vouchers:/data/vouchers\n\n"
         "      - ./data/transactions:/data/transactions\n\n"
-        "      - ./data/transactions_test:/data/transactions_test\n\n"
+        "      - ./data/transactions_test:/data/transactions_test\n"
+        "      - ./reports:/reports\n\n"
         
         "  gateway:\n"
         "    build:\n"
@@ -53,6 +57,7 @@ def base_services_setup(f):
         "      - PYTHONUNBUFFERED=1\n"
         "      - RABBITMQ_HOST=rabbitmq\n"
         "      - OUTPUT_QUEUE=raw_data\n"
+        "      - REPORTS_EXCHANGE=reports_exchange\n"
         "    volumes:\n"
         "      - ./server/config.ini:/app/config.ini\n\n"
     )
@@ -143,6 +148,8 @@ def report_generator_service_setup(f, input_queue):
         f"      - PYTHONUNBUFFERED=1\n"
         f"      - RABBITMQ_HOST=rabbitmq\n"
         f"      - INPUT_QUEUE={input_queue}\n"
+        f"      - OUTPUT_EXCHANGE=reports_exchange\n"
+        f"      - QUERY_TYPE={query_type}\n"
         f"    volumes:\n"
         f"      - ./server/config.ini:/app/config.ini\n"
         f"      - ./reports:/app/reports\n\n"
