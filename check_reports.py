@@ -87,3 +87,13 @@ stores["store_name"] = stores["store_name"].astype("string").str.strip()
 stores["city"] = stores["city"].astype("string").str.strip()
 stores["state"] = stores["state"].astype("string").str.strip()
 stores["store_id"] = pd.to_numeric(stores["store_id"], errors="coerce").astype("Int64")
+
+# Query 1
+
+q1_transactions_6_to_23_hours = transactions.set_index('created_at').between_time("6:00","23:00")
+q1_transactions_6_to_23_hours.reset_index(inplace=True) 
+q1_transactions_6_to_23_hours_gt_15 = q1_transactions_6_to_23_hours[q1_transactions_6_to_23_hours["final_amount"] >= 75]
+
+generated_q1_filename = './reports/generated_query1.csv'
+q1_transactions_6_to_23_hours_gt_15[["transaction_id", "final_amount"]].sort_values(by="transaction_id", ascending=True).to_csv(generated_q1_filename, index=False, lineterminator='\n')
+remove_last_newline(generated_q1_filename)
