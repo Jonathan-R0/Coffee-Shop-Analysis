@@ -41,7 +41,8 @@ class ReportGenerator:
         """Procesa mensajes según el routing key"""
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
-            
+
+            logger.info(f"Mensaje recibido con routing key: {routing_key}, tipo: {dto.batch_type}, tamaño: {len(dto.data)} bytes")
             # Determinar query desde routing key
             if routing_key.startswith('q1'):
                 query_name = 'q1'
@@ -105,6 +106,7 @@ class ReportGenerator:
     def _generate_and_send_report(self, query_name: str):
         """Genera el reporte final y lo envía al gateway"""
         try:
+            logger.info(f"Generando reporte para {query_name}")
             if query_name == 'q1':
                 lines = self.q1_lines
                 # Q1: Ordenar por transaction_id (primera columna)

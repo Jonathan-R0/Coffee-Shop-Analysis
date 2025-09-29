@@ -14,6 +14,7 @@ class Client:
         self.client_socket = None
         self.protocol = None  
         self.processor = None
+        self.reports_ammount = 2
     
     def run(self):
         self.keep_running = True
@@ -39,7 +40,7 @@ class Client:
             #"D": "/data/transactions_test",
             #"D": "/data/transaction_items",
             #"users": "/data/users",
-            #"S": "/data/stores",
+            "S": "/data/stores",
             #"menu_items": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
             #"vouchers": "/data/vouchers"
@@ -101,6 +102,7 @@ class Client:
         """Recibe el reporte del servidor en batches y lo guarda."""
         try:
             # Crear directorio reports si no existe
+            report_counter = 0
             reports_dir = "/reports"
             os.makedirs(reports_dir, exist_ok=True)
             
@@ -118,8 +120,9 @@ class Client:
             while True:
                 
                 # Recibir un mensaje del servidor
+                logger.info("Esperando mensaje del servidor...")
                 response = self.protocol._receive_single_message()
-                logger.info(f"Respuesta recibida: {response}")
+                # logger.info(f"Respuesta recibida: {response}")
                 
                 if response is None:
                     logger.warning("Conexión cerrada por el servidor o response None")
@@ -129,7 +132,7 @@ class Client:
                         self._save_report(report_content, reports_dir)
                     break
                 
-                logger.info(f"Respuesta recibida: {response}")
+                # logger.info(f"Respuesta recibida: {response}")
                 
                 if response.action == "RPRT":
                     batch_count += 1
@@ -144,10 +147,20 @@ class Client:
                 elif response.action == "EOF":
                     logger.info(f"EOF recibido. Total batches: {batch_count}")
                     if report_content:
-                        self._save_report(report_content, reports_dir)
+                        logger.info(f"Guardando reporte con {report_content} ")
+                        self._save_report(report_content, reports_dir,f"report_{report_counter+1}.csv")
+                        report_counter += 1
+                        report_content = []  # Reset para el próximo reporte
+                        if report_counter >= self.reports_ammount:
+                            logger.info(f"Se recibieron y guardaron {report_counter} reportes. Terminando recepción.")
+                            break
+                        else:
+                            logger.info(f"Esperando más reportes... ({report_counter}/{self.reports_ammount})")
+                            continue
                     else:
                         logger.warning("EOF recibido pero no hay contenido del reporte")
                     # No enviar ACK para EOF
+                    
                     break
                         
                 elif response.action == "ERRO":
@@ -161,7 +174,7 @@ class Client:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
     
-    def _save_report(self, report_batches, reports_dir):
+    def _save_report(self, report_batches, reports_dir,query_name):
         """Guarda el reporte completo combinando todos los batches y transformándolo a CSV."""
         try:
             logger.info(f"Iniciando guardado del reporte...")
@@ -186,7 +199,7 @@ class Client:
             logger.info(f"Datos transformados a CSV - tamaño: {len(csv_content)} caracteres")
             
             # Guardar en archivo
-            report_path = os.path.join(reports_dir, "query1.csv")
+            report_path = os.path.join(reports_dir, query_name)
             logger.info(f"Intentando escribir archivo: {report_path}")
             
             with open(report_path, 'w', encoding='utf-8') as f:
@@ -226,7 +239,7 @@ class Client:
             logger.info(f"Procesando {len(lines)} líneas de datos raw")
             
             # Agregar header CSV
-            csv_lines = ["transaction_id,final_amount"]
+            csv_lines = []
             
             valid_lines = 0
             for line in lines:

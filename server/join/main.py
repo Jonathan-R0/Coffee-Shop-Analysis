@@ -211,6 +211,7 @@ class JoinNode:
             routing_key: Key que identifica el tipo de dato
         """
         try:
+            logger.info(f"Mensaje recibido con routing key: {routing_key}")
             if routing_key in ['stores.data', 'stores.eof']:
                 dto = StoreBatchDTO.from_bytes_fast(message)
                 

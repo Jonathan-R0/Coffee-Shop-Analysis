@@ -34,6 +34,8 @@ class Protocol:
     def send_batch_message(self, batch_result: BatchResult, file_type: str) -> bool:
         """Envía un batch de líneas al servidor."""
         try:
+            logger.info(f"DEBUG: Iniciando send_batch_message - file_type: {file_type}, items: {len(batch_result.items)}, is_eof: {batch_result.is_eof}")
+            
             # Unir las líneas con '\n' para formar el contenido del batch
             message_content = "\n".join(batch_result.items)
 
@@ -43,6 +45,8 @@ class Protocol:
             
             message_size = len(message_content)
             is_last_batch = batch_result.is_eof
+            
+            logger.info(f"DEBUG: Preparando mensaje - size: {message_size}, last_batch: {is_last_batch}")
             
             # Crear el mensaje: [ACTION(4)] + [FILE-TYPE(1)] + [SIZE(4)] + [LAST-BATCH(1)] + [DATA(N)]
             message = bytearray()
@@ -64,17 +68,21 @@ class Protocol:
             message.extend(message_content.encode('utf-8'))
             
             # Enviar el mensaje
+            logger.info(f"DEBUG: Enviando mensaje - total bytes: {len(message)}")
             success = self._send_all(bytes(message))
             
             if not success:
+                logger.error(f"DEBUG: Error en _send_all")
                 return False
             
+            logger.info(f"DEBUG: Mensaje enviado exitosamente, esperando ACK...")
             # Esperar el ACK del servidor
             ack_response = self._receive_ack()
             if ack_response is None:
                 logger.error("No se recibió ACK del servidor")
                 return False
             
+            logger.info(f"DEBUG: ACK recibido - batch_id: {ack_response.batch_id}, status: {ack_response.status}")
             if ack_response.status != 0:  # 0 = Success
                 logger.error(f"Server respondió con error: status={ack_response.status}")
                 return False
@@ -91,6 +99,7 @@ class Protocol:
     def send_exit_message(self) -> bool:
         """Envía un mensaje EXIT para cerrar la conexión."""
         try:
+            logger.info(f"DEBUG: Iniciando send_exit_message")
             # EXIT message: [ACTION(4)] + [FILE-TYPE(1)] + [SIZE(4)] + [LAST-BATCH(1)]
             message = bytearray()
             
@@ -107,17 +116,21 @@ class Protocol:
             # LAST-BATCH (1 byte) - true para EXIT
             message.extend(struct.pack('B', 1))
             
+            logger.info(f"DEBUG: Enviando EXIT message - total bytes: {len(message)}")
             success = self._send_all(bytes(message))
             
             if not success:
+                logger.error(f"DEBUG: Error enviando EXIT en _send_all")
                 return False
             
+            logger.info(f"DEBUG: EXIT enviado, esperando ACK...")
             # Esperar el ACK del servidor para EXIT
             ack_response = self._receive_ack()
             if ack_response is None:
                 logger.error("No se recibió ACK del servidor para EXIT")
                 return False
             
+            logger.info(f"DEBUG: ACK para EXIT recibido - batch_id: {ack_response.batch_id}, status: {ack_response.status}")
             if ack_response.status != 0:  # 0 = Success
                 logger.error(f"Server respondió con error para EXIT: status={ack_response.status}")
                 return False
@@ -224,24 +237,29 @@ class Protocol:
     def _receive_ack(self) -> Optional[AckResponse]:
         """Recibe un ACK del servidor."""
         try:
+            logger.info(f"DEBUG: Esperando ACK del servidor...")
             # Leer ACK header (4 bytes: 'ACK|')
             ack_header = self._recv_all(4)
             if not ack_header or ack_header != b'ACK|':
                 logger.error(f"ACK header inválido: {ack_header}")
                 return None
             
+            logger.info(f"DEBUG: ACK header válido recibido")
             # Leer batch_id (4 bytes)
             batch_id_bytes = self._recv_all(4)
             if not batch_id_bytes:
+                logger.error(f"DEBUG: Error leyendo batch_id")
                 return None
             batch_id = struct.unpack('>I', batch_id_bytes)[0]
             
             # Leer status (1 byte)
             status_bytes = self._recv_all(1)
             if not status_bytes:
+                logger.error(f"DEBUG: Error leyendo status")
                 return None
             status = struct.unpack('B', status_bytes)[0]
             
+            logger.info(f"DEBUG: ACK completo recibido - batch_id: {batch_id}, status: {status}")
             return AckResponse(batch_id=batch_id, status=status)
             
         except Exception as e:
@@ -251,6 +269,7 @@ class Protocol:
     def send_response_message(self, action: str, file_type: str, data: str, is_last_batch: bool = True) -> bool:
         """Envía un mensaje de respuesta del servidor al cliente (como un reporte)."""
         try:
+            logger.info(f"DEBUG: Iniciando send_response_message - action: {action}, file_type: {file_type}, data_len: {len(data) if data else 0}, is_last_batch: {is_last_batch}")
             message_size = len(data) if data else 0
             
             if message_size > MAX_MESSAGE_SIZE:
@@ -282,22 +301,28 @@ class Protocol:
                 message.extend(data_bytes)
             
             # Enviar el mensaje
+            logger.info(f"DEBUG: Enviando response message - total bytes: {len(message)}")
             success = self._send_all(bytes(message))
             
             if not success:
                 logger.error(f"Error enviando mensaje de respuesta: action={action}, file_type={file_type}")
                 return False
             
+            logger.info(f"DEBUG: Response message enviado exitosamente")
             # Esperar ACK del cliente (solo para batches de datos, no para EOF)
             if action != "EOF":
+                logger.info(f"DEBUG: Esperando ACK del cliente para action: {action}")
                 ack_response = self._receive_ack()
                 if ack_response is None:
                     logger.error("No se recibió ACK del cliente")
                     return False
                 
+                logger.info(f"DEBUG: ACK del cliente recibido - batch_id: {ack_response.batch_id}, status: {ack_response.status}")
                 if ack_response.status != 0:  # 0 = Success
                     logger.error(f"Cliente respondió con error: status={ack_response.status}")
                     return False
+            else:
+                logger.info(f"DEBUG: No esperando ACK para EOF")
             
             return True
             
@@ -356,8 +381,10 @@ class Protocol:
     def _send_ack(self, batch_id: int, status: int):
         """Envía un ACK al cliente."""
         try:
+            logger.info(f"DEBUG: Enviando ACK - batch_id: {batch_id}, status: {status}")
             ack_data = struct.pack('>4sIB', b'ACK|', batch_id, status)
             self.conn.send(ack_data)
+            logger.info(f"DEBUG: ACK enviado exitosamente")
         except Exception as e:
             logger.error(f"Error enviando ACK: {e}")
 
@@ -402,6 +429,7 @@ class Protocol:
         Envía un mensaje FINISH indicando que terminó de procesar todos los archivos de un tipo.
         """
         try:
+            logger.info(f"DEBUG: Iniciando send_finish_message para file_type: {file_type}")
             message = bytearray()
             
             # ACTION (4 bytes)
@@ -417,17 +445,21 @@ class Protocol:
             # LAST-BATCH (1 byte) - true
             message.extend(struct.pack('B', 1))
             
+            logger.info(f"DEBUG: Enviando FINISH message - total bytes: {len(message)}")
             success = self._send_all(bytes(message))
             
             if not success:
+                logger.error(f"DEBUG: Error enviando FINISH en _send_all")
                 return False
             
+            logger.info(f"DEBUG: FINISH enviado, esperando ACK...")
             # Esperar el ACK del servidor para FINISH
             ack_response = self._receive_ack()
             if ack_response is None:
                 logger.error("No se recibió ACK del servidor para FINISH")
                 return False
             
+            logger.info(f"DEBUG: ACK para FINISH recibido - batch_id: {ack_response.batch_id}, status: {ack_response.status}")
             if ack_response.status != 0:  # 0 = Success
                 logger.error(f"Server respondió con error para FINISH: status={ack_response.status}")
                 return False

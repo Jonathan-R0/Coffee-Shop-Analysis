@@ -140,7 +140,6 @@ class GroupByNode:
     def _handle_eof_message(self) -> bool:
         try:
             logger.info("EOF recibido. Generando resultados finales de TPV")
-            
             results_csv = self._generate_results_csv()
             
             result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
@@ -174,6 +173,8 @@ class GroupByNode:
         """
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
+            
+            logger.info(f"Mensaje recibido: tipo={dto.batch_type}, tamaño={len(dto.data)} bytes")
             
             if dto.batch_type == BatchType.EOF:
                 return self._handle_eof_message()
