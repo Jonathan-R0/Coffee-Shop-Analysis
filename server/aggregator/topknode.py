@@ -76,11 +76,11 @@ class TopKNode:
         for store_id in sorted(self.store_user_purchases.keys()):
             user_purchases = self.store_user_purchases[store_id]
             
-            # Ordenar por purchases_qty (descendente)
+            # Ordenar por purchases_qty (descendente) y luego por user_id (ascendente) para desempate determinístico
+            # Esto replica el comportamiento de pandas: sort_values(by=["store_id", "purchases_qty"], ascending=[True, False])
             sorted_users = sorted(
                 user_purchases.items(),
-                key=lambda x: x[1],
-                reverse=True
+                key=lambda x: (-x[1], int(float(x[0].replace('.0', '')))),  # -purchases_qty, +user_id_as_int
             )
             
             # Tomar top 3

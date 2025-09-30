@@ -57,14 +57,33 @@ class TopKNodeRunner:
             logger.info(f"  Input Exchange: {input_exchange}")
             logger.info(f"  Input Routing Keys: {routing_keys}")
         else:
-            # Nodo intermedio: recibe de cola específica (round-robin con otros nodos)
-            input_queue = os.getenv('INPUT_QUEUE', 'aggregated_data')
+            # Nodo intermedio: recibe stores específicos por routing key
+            input_exchange = os.getenv('INPUT_EXCHANGE', 'aggregated.exchange')
             
-            self.input_middleware = MessageMiddlewareQueue(
+            # Determinar qué stores procesa este nodo basado en NODE_ID
+            node_id = int(os.getenv('TOPK_NODE_ID', '1'))
+            total_nodes = int(os.getenv('TOTAL_TOPK_NODES', '2'))
+            
+            # Distribuir stores entre nodos (stores 1-10, asumiendo 10 stores)
+            total_stores = 10  # Esto podría ser dinámico
+            stores_per_node = total_stores // total_nodes
+            extra_stores = total_stores % total_nodes
+            
+            start_store = (node_id - 1) * stores_per_node + min(node_id - 1, extra_stores)
+            end_store = start_store + stores_per_node + (1 if node_id <= extra_stores else 0)
+            
+            # Generar routing keys para los stores asignados a este nodo
+            routing_keys = [f"store.{i}" for i in range(start_store + 1, end_store + 1)]
+            routing_keys.append('aggregated.eof')  # También escucha EOF
+            
+            self.input_middleware = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
-                queue_name=input_queue
+                exchange_name=input_exchange,
+                route_keys=routing_keys
             )
-            logger.info(f"  Input Queue: {input_queue}")
+            logger.info(f"  Input Exchange: {input_exchange}")
+            logger.info(f"  Node {node_id}/{total_nodes} procesa stores: {start_store + 1}-{end_store}")
+            logger.info(f"  Routing Keys: {routing_keys}")
     
     def _setup_output_middleware(self):
         """Configura el middleware de salida según el tipo de nodo."""
