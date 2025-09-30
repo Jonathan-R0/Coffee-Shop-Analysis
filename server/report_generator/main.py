@@ -2,7 +2,7 @@ import logging
 import os
 from datetime import datetime
 from rabbitmq.middleware import MessageMiddlewareExchange
-from dtos.dto import TransactionBatchDTO, BatchType
+from dtos.dto import TransactionBatchDTO, BatchType, ReportBatchDTO
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -11,7 +11,8 @@ class ReportGenerator:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.report_exchange = os.getenv('REPORT_EXCHANGE', 'report.exchange')
-        
+        self.reports_exchange = os.getenv('REPORTS_EXCHANGE', 'reports_exchange')
+
         self.input_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.report_exchange,
@@ -36,11 +37,13 @@ class ReportGenerator:
                 self._close_csv_file(query_name)
                 self.eof_received.add(query_name)
                 
-                # Si recibimos EOF de todas las queries, terminar
-                if len(self.eof_received) >= 3:  # q1, q3 y q4
-                    logger.info("Todos los reportes completados")
+                # Si recibimos EOF de todas las queries (Q1, Q3, Q4), terminar
+                if len(self.eof_received) >= 3:
+                    logger.info("Todos los reportes completados (Q1, Q3, Q4)")
+                    self._publish_reports()
                     return True
-                
+                                
+
                 return False
             
             if dto.batch_type == BatchType.RAW_CSV:
@@ -152,6 +155,45 @@ class ReportGenerator:
         except Exception as e:
             logger.error(f"Error cerrando el archivo CSV para {query_name}: {e}")
 
+    def _publish_reports(self):
+        """Publica todos los reportes generados al exchange."""
+        try:
+            publisher = MessageMiddlewareExchange(
+                host=self.rabbitmq_host,
+                exchange_name=self.reports_exchange,
+                route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof']
+            )
+            
+            batch_size = 150
+            for query_name in ['q1', 'q3', 'q4']:  # Las 3 queries activas
+                reports_dir = './reports'
+                files = [f for f in os.listdir(reports_dir) if f.startswith(query_name) and f.endswith('.csv')]
+
+                for file in files:
+                    file_path = os.path.join(reports_dir, file)
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        total_lines = len(lines)
+                        for i in range(0, total_lines, batch_size):
+                            batch_lines = lines[i:i+batch_size]
+                            batch_data = ''.join(batch_lines)
+                            report_dto = ReportBatchDTO(
+                                batch_data,
+                                BatchType.RAW_CSV,
+                                query_name
+                            )
+                            publisher.send(report_dto.to_bytes_fast(), routing_key=f'{query_name}.data')
+                        
+                        # Enviar EOF para este query
+                        eof_dto = ReportBatchDTO.create_eof(query_name)
+                        publisher.send(eof_dto.to_bytes_fast(), routing_key=f'{query_name}.eof')
+                        logger.info(f"Enviados {total_lines} líneas y EOF para {query_name}")
+
+            # publisher.close()
+            logger.info("Todos los reportes publicados exitosamente")
+            
+        except Exception as e:
+            logger.error(f"Error publicando reportes: {e}")
 
 if __name__ == "__main__":
     report_generator = ReportGenerator()

@@ -8,7 +8,7 @@ from common.protocol import Protocol, ProtocolMessage
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dataclasses import asdict
 from logger import get_logger
-from dtos.dto import TransactionBatchDTO, BatchType, StoreBatchDTO,UserBatchDTO
+from dtos.dto import TransactionBatchDTO, BatchType, StoreBatchDTO,UserBatchDTO, ReportBatchDTO
 
 logger = get_logger(__name__)
 
@@ -30,7 +30,7 @@ class Gateway:
         self.report_middleware = MessageMiddlewareExchange(
             host=rabbitmq_host,
             exchange_name=self._reports_exchange,
-            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof']
+            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof']  # Las 3 queries activas
         )
 
     def handle_connection(self, client_sock):
@@ -148,7 +148,7 @@ class Gateway:
 
     def _wait_and_send_report(self, protocol):
         """
-        Espera por AMBOS reportes (Q1 y Q3) del report generator y los envía al cliente.
+        Espera por TODOS los reportes (Q1, Q3, Q4) del report generator y los envía al cliente.
         """
         try:
             logger.info("Esperando reportes del pipeline...")
@@ -156,61 +156,66 @@ class Gateway:
             # Acumuladores para cada reporte
             q1_transactions = []
             q3_transactions = []
-            current_query = None
+            q4_transactions = []
             eof_count = 0
             
             def report_callback(ch, method, properties, body):
-                nonlocal current_query, eof_count
+                nonlocal eof_count
                 
                 try:
-                    dto = TransactionBatchDTO.from_bytes_fast(body)
+                    # Usar ReportBatchDTO para decodificar
+                    dto = ReportBatchDTO.from_bytes_fast(body)
+                    routing_key = method.routing_key
+                    query_name = routing_key.split('.')[0]  # 'q1', 'q3', o 'q4'
                     
-                    # Detectar inicio de reporte
-                    if dto.batch_type == "CONTROL" and dto.data.startswith("START:"):
-                        current_query = dto.data.split(":")[1].lower()  # "q1" o "q3"
-                        logger.info(f"Iniciando recepción de reporte {current_query}")
-                        return
+                    logger.info(f"Recibido mensaje para {query_name}: {dto.batch_type}, routing: {routing_key}")
                     
-                    # Detectar EOF
-                    elif dto.batch_type == "EOF":
+                    # Detectar EOF por routing key (.eof) en lugar de por batch_type
+                    if routing_key.endswith('.eof'):
                         eof_count += 1
-                        logger.info(f"EOF recibido para {current_query}. Total EOF: {eof_count}")
+                        logger.info(f"EOF recibido para {query_name}. Total EOF: {eof_count}")
                         
-                        # Si recibimos ambos EOF, terminar
-                        if eof_count >= 2:
-                            logger.info("Ambos reportes recibidos completamente")
-                            self.report_middleware.stop_consuming()
+                        # Si recibimos los 3 EOF, terminar
+                        if eof_count >= 3:
+                            logger.info("Todos los reportes recibidos completamente")
+                            ch.stop_consuming()
                         return
                     
-                    # Procesar datos
-                    elif dto.batch_type == "RAW_CSV" and current_query:
+                    # Procesar datos RAW_CSV (ahora llegan como RAW_CSV en lugar de tipos específicos)
+                    elif dto.batch_type == BatchType.RAW_CSV:
                         lines = dto.data.strip().split('\n')
                         
                         for line in lines:
                             if line.strip():
                                 values = line.split(',')
                                 
-                                if current_query == "q1" and len(values) >= 2:
+                                if query_name == "q1" and len(values) >= 2:
                                     q1_transactions.append({
                                         "transaction_id": values[0],
                                         "final_amount": values[1]
                                     })
-                                elif current_query == "q3" and len(values) >= 3:
+                                elif query_name == "q3" and len(values) >= 3:
                                     q3_transactions.append({
                                         "year_half": values[0],
                                         "store_name": values[1],
                                         "tpv": values[2]
                                     })
+                                elif query_name == "q4" and len(values) >= 3:
+                                    q4_transactions.append({
+                                        "user_id": values[0],
+                                        "total_spent": values[1],
+                                        "total_transactions": values[2]
+                                    })
                         
-                        logger.info(f"Batch procesado: Q1={len(q1_transactions)}, Q3={len(q3_transactions)}")
+                        logger.info(f"Batch procesado: Q1={len(q1_transactions)}, Q3={len(q3_transactions)}, Q4={len(q4_transactions)}")
                     
                 except Exception as e:
                     logger.error(f"Error procesando batch del reporte: {e}")
             
-            # Consumir batches hasta recibir ambos EOF
+            # Consumir batches hasta recibir los 3 EOF
             self.report_middleware.start_consuming(report_callback)
             
-            # Enviar ambos reportes al cliente
+            # Enviar los 3 reportes al cliente
             if q1_transactions:
                 csv_q1 = self._convert_transactions_to_csv(q1_transactions)
                 self._send_report_via_protocol(protocol, csv_q1, "Q1")
@@ -220,6 +225,11 @@ class Gateway:
                 csv_q3 = self._convert_q3_to_csv(q3_transactions)
                 self._send_report_via_protocol(protocol, csv_q3, "Q3")
                 logger.info(f"Reporte Q3 enviado: {len(q3_transactions)} registros")
+                
+            if q4_transactions:
+                csv_q4 = self._convert_q4_to_csv(q4_transactions)
+                self._send_report_via_protocol(protocol, csv_q4, "Q4")
+                logger.info(f"Reporte Q4 enviado: {len(q4_transactions)} registros")
             
             self.report_middleware.close()
             
@@ -237,6 +247,17 @@ class Gateway:
         except Exception as e:
             logger.error(f"Error convirtiendo Q3 a CSV: {e}")
             return "year_half_created_at,store_name,tpv\nERROR,ERROR,0"
+
+    def _convert_q4_to_csv(self, records):
+        """Convierte registros Q4 a formato CSV."""
+        try:
+            csv_lines = ["user_id,total_spent,total_transactions"]
+            for record in records:
+                csv_lines.append(f"{record['user_id']},{record['total_spent']},{record['total_transactions']}")
+            return '\n'.join(csv_lines)
+        except Exception as e:
+            logger.error(f"Error convirtiendo Q4 a CSV: {e}")
+            return "user_id,total_spent,total_transactions\nERROR,0,0"
 
     def _send_report_via_protocol(self, protocol, csv_content, report_name="RPRT"):
         """Envía un reporte usando el protocolo existente."""

@@ -14,6 +14,7 @@ class FileType(Enum):
     PAYMENT_METHODS = "payment_methods"
     VOUCHERS = "vouchers"
     TRANSACTION_ITEMS = "transaction_items"
+    REPORT_BATCH = "report_batch"
 
 
 class BatchType(Enum):
@@ -105,6 +106,7 @@ class BaseDTO(ABC):
             return self.data.encode('utf-8')
         else:
             return
+        
     
     
     @classmethod
@@ -322,6 +324,71 @@ class TransactionItemBatchDTO(BaseDTO):
         }
 
 
+class ReportBatchDTO(BaseDTO):
+    """
+    DTO específico para batches de reportes (RAW_CSV).
+    """
+    
+    def __init__(self, data: str, batch_type: BatchType, query_name: str = None):
+        super().__init__(data, batch_type, None)
+        self.query_name = query_name
+    
+    @classmethod
+    def create_eof(cls, query_name: str):
+        """Helper para crear EOF markers."""
+        return cls("EOF:", BatchType.EOF, query_name)
+
+    def get_csv_headers(self) -> List[str]:
+        if self.query_name == "Q1":
+            return ["store_id", "total_sales", "total_transactions"]
+        elif self.query_name == "Q3":
+            return ["item_id", "total_quantity_sold", "total_revenue"]
+        elif self.query_name == "Q4":
+            return ["user_id", "total_spent", "total_transactions"]
+    
+    def dict_to_csv_line(self, record: Dict) -> str:
+        if self.query_name == "Q1":
+            return f"{record['store_id']},{record['total_sales']},{record['total_transactions']}"
+        elif self.query_name == "Q3":
+            return f"{record['item_id']},{record['total_quantity_sold']},{record['total_revenue']}"
+        elif self.query_name == "Q4":
+            return f"{record['user_id']},{record['total_spent']},{record['total_transactions']}"
+        
+    def csv_line_to_dict(self, csv_line: str) -> Dict:
+        if self.query_name == "Q1":
+            values = csv_line.split(',')
+            return {
+                "store_id": values[0],
+                "total_sales": values[1],
+                "total_transactions": values[2]
+            }
+        elif self.query_name == "Q3":
+            values = csv_line.split(',')
+            return {
+                "item_id": values[0],
+                "total_quantity_sold": values[1],
+                "total_revenue": values[2]
+            }
+        elif self.query_name == "Q4":
+            values = csv_line.split(',')
+            return {
+                "user_id": values[0],
+                "total_spent": values[1],
+                "total_transactions": values[2]
+            }
+            
+    def get_batch_name(self) -> str:
+        if self.query_name == "Q1":
+            return "query1.csv"
+        elif self.query_name == "Q3":
+            return "query3.csv"
+        elif self.query_name == "Q4":
+            return "query4.csv"
+        else:
+            return "UNKNOWN"
+        
+    def get_column_index(self, column_name: str) -> int:
+        raise NotImplementedError("ReportBatchBatchDTO no tiene columnas específicas.")
 class DTOFactory:
     """
     Factory para crear DTOs según el tipo de archivo.
@@ -333,6 +400,7 @@ class DTOFactory:
         FileType.STORES: StoreBatchDTO,
         FileType.MENU_ITEMS: MenuItemBatchDTO,
         FileType.TRANSACTION_ITEMS: TransactionItemBatchDTO,
+        FileType.REPORT_BATCH: ReportBatchDTO,
     }
     
     @classmethod

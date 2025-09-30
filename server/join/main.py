@@ -40,6 +40,7 @@ class JoinNode:
         self.users_loaded = False
         self.top_customers_loaded = False
         self.expected_groupby_nodes = 2  # Semestre 1 y 2
+        self.top_customers_sent = False  # Para evitar múltiples envíos de Q4
 
         self.store_dto_helper = StoreBatchDTO("", BatchType.RAW_CSV)
         self.user_dto_helper = UserBatchDTO("", BatchType.RAW_CSV)
@@ -193,9 +194,12 @@ class JoinNode:
         
         logger.info(f"Top customers procesados: {processed_count}. Total en memoria: {len(self.top_customers_data)}")
         
-        if self.stores_loaded:
+        if self.stores_loaded and not self.top_customers_sent:
             self._perform_top_customers_join()
-    
+            self.top_customers_sent = True
+            logger.info("Finalizando procesamiento por EOF de top customers")
+            
+
     def _perform_join(self):
         """
         Hace JOIN entre stores y TPV data en memoria.
@@ -318,9 +322,12 @@ class JoinNode:
             self._send_results_to_exchange()
         
         # Query 4: Si hay datos de top customers y users están cargados, enviar Q4
-        if self.top_customers_data and self.users_loaded:
+        if self.top_customers_data and self.users_loaded and not self.top_customers_sent:
+            logger.info("Stores y users cargados - enviando resultados Q4")
             self._perform_top_customers_join()
-        
+            self.top_customers_sent = True
+
+        logger.info("Finalizando procesamiento por EOF de stores")
         return False  # No cerrar el nodo, puede haber más datos llegando
     
     def _handle_user_eof(self):
@@ -329,9 +336,10 @@ class JoinNode:
         self.users_loaded = True
         
         # Query 4: Solo enviar cuando stores y top customers estén cargados
-        if self.top_customers_data and self.stores_loaded:
+        if self.top_customers_data and self.stores_loaded and not self.top_customers_sent:
             logger.info("Users, stores y top customers completados - enviando resultados Q4")
             self._perform_top_customers_join()
+            self.top_customers_sent = True
         else:
             missing = []
             if not self.stores_loaded:
@@ -365,9 +373,10 @@ class JoinNode:
         self.top_customers_loaded = True
         
         # Query 4: Solo enviar cuando stores y users estén cargados
-        if self.stores_loaded and self.users_loaded:
+        if self.stores_loaded and self.users_loaded and not self.top_customers_sent:
             logger.info("Top customers, stores y users completados - enviando resultados Q4")
             self._perform_top_customers_join()
+            self.top_customers_sent = True
         else:
             missing = []
             if not self.stores_loaded:

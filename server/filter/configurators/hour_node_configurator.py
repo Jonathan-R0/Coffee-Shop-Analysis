@@ -53,12 +53,6 @@ class HourNodeConfigurator(NodeConfigurator):
         if output_middleware_exchange:
             self._send_to_exchange_by_semester(data, output_middleware_exchange)
         
-        # Enviar a exchange para top_customers
-        if output_q4_middleware:
-            filtered_dto = TransactionBatchDTO(data, batch_type=BatchType.RAW_CSV)
-            output_q4_middleware.send(filtered_dto.to_bytes_fast(), routing_key='filtered.data')
-            logger.info("Datos filtrados enviados a top_customers exchange")
-    
     def send_eof(self, output_middleware, output_exchange_middleware, 
                 output_middleware_exchange, output_q4_middleware=None):
         eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
@@ -73,14 +67,6 @@ class HourNodeConfigurator(NodeConfigurator):
             )
             logger.info("EOF:1 enviado a routing key 'eof.all'")
         
-        # Enviar EOF a top_customers exchange
-        if output_q4_middleware:
-            output_q4_middleware.send(
-                eof_dto.to_bytes_fast(),
-                routing_key='filtered.eof'
-            )
-            logger.info("EOF:1 enviado a top_customers exchange")
-            
     def _send_to_exchange_by_semester(self, csv_data: str, exchange_middleware):
         """Separa datos por semestre y envía con routing key apropiada."""
         semester_1_lines = []
