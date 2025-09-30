@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Dict, Any
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO, BatchType
 from .base_configurator import NodeConfigurator
@@ -9,66 +9,52 @@ logger = logging.getLogger(__name__)
 
 class HourNodeConfigurator(NodeConfigurator):
     def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str],
-                                  output_q4: Optional[str] = None) -> Tuple:
-        output_middleware = None
+                                  output_q4: Optional[str] = None) -> Dict[str, Any]:
+        middlewares = {}
+        
         if output_q1:
-            output_middleware = MessageMiddlewareQueue(
+            middlewares['q1'] = MessageMiddlewareQueue(
                 host=self.rabbitmq_host,
                 queue_name=output_q1
             )
-            logger.info(f"  Output Queue: {output_q1}")
+            logger.info(f"  Output Q1 Queue: {output_q1}")
         
-        output_middleware_exchange = None
         if output_q3:
-            output_middleware_exchange = MessageMiddlewareExchange(
+            middlewares['q3'] = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
                 exchange_name=output_q3,
-                route_keys=['semester.1', 'semester.2', 'eof.all']
+                route_keys=[]
             )
-            logger.info(f"  Output Exchange: {output_q3}")
+            logger.info(f"  Output Q3 Exchange: {output_q3}")
         
-        # Nueva salida para top_customers
-        output_q4_middleware = None
-        if output_q4:
-            output_q4_middleware = MessageMiddlewareExchange(
-                host=self.rabbitmq_host,
-                exchange_name=output_q4,
-                route_keys=['filtered.data', 'filtered.eof']
-            )
-            logger.info(f"  Output Q4 Exchange: {output_q4}")
-        
-        return output_middleware, None, output_middleware_exchange, output_q4_middleware
+        return middlewares
     
     def process_filtered_data(self, filtered_csv: str) -> str:
         return filtered_csv
     
-    def send_data(self, data: str, output_middleware, output_exchange_middleware, 
-                 output_middleware_exchange, output_q4_middleware=None):
-        # Enviar a queue normal (para filter amount)
-        if output_middleware:
+    def send_data(self, data: str, middlewares: Dict[str, Any]):
+        if 'q1' in middlewares:
             filtered_dto = TransactionBatchDTO(data, batch_type=BatchType.RAW_CSV)
-            output_middleware.send(filtered_dto.to_bytes_fast())
+            middlewares['q1'].send(filtered_dto.to_bytes_fast())
         
-        # Enviar a exchange por semestre (para groupby TPV)
-        if output_middleware_exchange:
-            self._send_to_exchange_by_semester(data, output_middleware_exchange)
-        
-    def send_eof(self, output_middleware, output_exchange_middleware, 
-                output_middleware_exchange, output_q4_middleware=None):
+        if 'q3' in middlewares:
+            self._send_to_exchange_by_semester(data, middlewares['q3'])
+    
+    def send_eof(self, middlewares: Dict[str, Any]):
         eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
         
-        if output_middleware:
-            output_middleware.send(eof_dto.to_bytes_fast())
+        if 'q1' in middlewares:
+            middlewares['q1'].send(eof_dto.to_bytes_fast())
+            logger.info("EOF:1 enviado a Q1 queue")
         
-        if output_middleware_exchange:
-            output_middleware_exchange.send(
+        if 'q3' in middlewares:
+            middlewares['q3'].send(
                 eof_dto.to_bytes_fast(),
                 routing_key='eof.all'
             )
-            logger.info("EOF:1 enviado a routing key 'eof.all'")
-        
+            logger.info("EOF:1 enviado a Q3 exchange con routing key 'eof.all'")
+            
     def _send_to_exchange_by_semester(self, csv_data: str, exchange_middleware):
-        """Separa datos por semestre y envía con routing key apropiada."""
         semester_1_lines = []
         semester_2_lines = []
         
