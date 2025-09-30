@@ -68,9 +68,9 @@ def main():
     print("=" * 60)
     print("Testing the following communication patterns:")
     print("1. Working Queue 1:1 - Single producer to single consumer")
-    print("2. Working Queue 1:N - Single producer to multiple consumers (load balancing)")
+    print("2. Working Queue 1:N - Single producer to multiple consumers")
     print("3. Exchange 1:1 - Single publisher to single subscriber")
-    print("4. Exchange 1:N - Single publisher to multiple subscribers (pub/sub)")
+    print("4. Exchange 1:N - Single publisher to multiple subscribers")
     print("=" * 60)
     
     success = True

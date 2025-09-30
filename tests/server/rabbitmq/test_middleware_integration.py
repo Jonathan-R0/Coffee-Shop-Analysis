@@ -1,4 +1,3 @@
-import pytest
 import unittest
 import threading
 import time
@@ -112,7 +111,7 @@ class TestMessageMiddlewareIntegration(unittest.TestCase):
 
     @patch('rabbitmq.middleware.pika.BlockingConnection')
     def test_working_queue_1_to_n_communication(self, mock_blocking_connection):
-        """Test 1:N communication using working queue pattern (load balancing)"""
+        """Test 1:N communication using working queue pattern"""
         # Setup mocks
         mock_connection = unittest.mock.Mock()
         mock_channel = unittest.mock.Mock()
@@ -256,7 +255,7 @@ class TestMessageMiddlewareIntegration(unittest.TestCase):
 
     @patch('rabbitmq.middleware.pika.BlockingConnection')
     def test_exchange_1_to_n_communication(self, mock_blocking_connection):
-        """Test 1:N communication using exchange pattern (pub/sub)"""
+        """Test 1:N communication using exchange pattern"""
         # Setup mocks
         mock_connection = unittest.mock.Mock()
         mock_channel = unittest.mock.Mock()
