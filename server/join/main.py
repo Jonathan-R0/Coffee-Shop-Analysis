@@ -228,6 +228,7 @@ class JoinNode:
             
             joined_record = {
                 'year_half_created_at': tpv_record['year_half_created_at'],
+                'store_id': store_id,  # Agregar store_id para el sorting
                 'store_name': store_name,
                 'tpv': tpv_record['total_payment_value']
             }
@@ -426,8 +427,10 @@ class JoinNode:
                 logger.warning("No hay datos joinados para enviar")
                 return
             
+            sorted_joined_data = sorted(self.joined_data, key=lambda x: (x['year_half_created_at'], int(x['store_id'])))
+            
             csv_lines = ["year_half_created_at,store_name,tpv"]
-            for record in self.joined_data:
+            for record in sorted_joined_data:
                 csv_lines.append(f"{record['year_half_created_at']},{record['store_name']},{record['tpv']:.2f}")
             
             results_csv = '\n'.join(csv_lines)

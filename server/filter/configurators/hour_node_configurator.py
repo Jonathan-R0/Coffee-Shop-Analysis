@@ -23,7 +23,7 @@ class HourNodeConfigurator(NodeConfigurator):
             middlewares['q3'] = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
                 exchange_name=output_q3,
-                route_keys=[]
+                route_keys=['semester.1', 'semester.2', 'eof.all']
             )
             logger.info(f"  Output Q3 Exchange: {output_q3}")
         
