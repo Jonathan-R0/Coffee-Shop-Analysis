@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch, MagicMock, call
+from unittest.mock import Mock, patch, call
 import pika
 import sys
 import os

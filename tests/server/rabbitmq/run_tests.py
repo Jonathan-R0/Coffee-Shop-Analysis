@@ -6,7 +6,6 @@ import argparse
 project_root = os.path.join(os.path.dirname(__file__), '..', '..', '..')
 sys.path.insert(0, project_root)
 
-
 def run_command(command, description):
     """Run a command and print the results"""
     print(f"\n{'='*60}")
