@@ -9,31 +9,20 @@ logger = logging.getLogger(__name__)
 
 
 class TopKNodeRunner:
-    """
-    Runner para nodos TopK que puede ser configurado como:
-    - TopK intermedio: recibe datos de múltiples GroupBy nodes
-    - TopK final: recibe datos de múltiples TopK intermedios
-    """
-    
     def __init__(self):
-        # Configuración básica
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.is_final = os.getenv('TOPK_MODE', 'intermediate') == 'final'
         self.node_id = os.getenv('TOPK_NODE_ID', '1')
         
-        # Para nodos finales: número de nodos intermedios que esperan
         self.total_nodes = int(os.getenv('TOTAL_TOPK_NODES', '1'))
         
-        # Crear el nodo TopK
         self.topk_node = TopKNode(
             is_final=self.is_final, 
             total_nodes=self.total_nodes
         )
         
-        # Configurar entrada según el tipo de nodo
         self._setup_input_middleware()
         
-        # Configurar salida según el tipo de nodo
         self._setup_output_middleware()
         
         logger.info(f"TopKNodeRunner inicializado:")
@@ -43,38 +32,31 @@ class TopKNodeRunner:
             logger.info(f"  Esperando {self.total_nodes} nodos TopK intermedios")
     
     def _setup_input_middleware(self):
-        """Configura el middleware de entrada según el tipo de nodo."""
         if self.is_final:
-            # Nodo final: recibe de múltiples TopK intermedios via exchange
             input_exchange = os.getenv('INPUT_EXCHANGE', 'topk.exchange')
-            routing_keys = ['topk.local.data', 'topk.local.eof']
             
             self.input_middleware = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
                 exchange_name=input_exchange,
-                route_keys=routing_keys
+                route_keys=['topk.local.data','topk.local.eof']
             )
             logger.info(f"  Input Exchange: {input_exchange}")
-            logger.info(f"  Input Routing Keys: {routing_keys}")
+            logger.info(f"  Input Routing Keys: 'topk.local.data','topk.local.eof'")
         else:
-            # Nodo intermedio: recibe stores específicos por routing key
             input_exchange = os.getenv('INPUT_EXCHANGE', 'aggregated.exchange')
             
-            # Determinar qué stores procesa este nodo basado en NODE_ID
             node_id = int(os.getenv('TOPK_NODE_ID', '1'))
             total_nodes = int(os.getenv('TOTAL_TOPK_NODES', '2'))
             
-            # Distribuir stores entre nodos (stores 1-10, asumiendo 10 stores)
-            total_stores = 10  # Esto podría ser dinámico
+            total_stores = 10  
             stores_per_node = total_stores // total_nodes
             extra_stores = total_stores % total_nodes
             
             start_store = (node_id - 1) * stores_per_node + min(node_id - 1, extra_stores)
             end_store = start_store + stores_per_node + (1 if node_id <= extra_stores else 0)
             
-            # Generar routing keys para los stores asignados a este nodo
             routing_keys = [f"store.{i}" for i in range(start_store + 1, end_store + 1)]
-            routing_keys.append('aggregated.eof')  # También escucha EOF
+            routing_keys.append('aggregated.eof')  
             
             self.input_middleware = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
@@ -86,10 +68,8 @@ class TopKNodeRunner:
             logger.info(f"  Routing Keys: {routing_keys}")
     
     def _setup_output_middleware(self):
-        """Configura el middleware de salida según el tipo de nodo."""
         output_exchange = os.getenv('OUTPUT_EXCHANGE', 'topk.exchange')
         
-        # Obtener routing keys del nodo TopK
         output_routing_keys = [
             self.topk_node.get_output_routing_key(),
             self.topk_node.get_eof_routing_key()
@@ -101,7 +81,6 @@ class TopKNodeRunner:
             route_keys=output_routing_keys
         )
         
-        # Para nodos intermedios, agregar input middleware para requeue EOF
         if not self.is_final:
             self.input_requeue_middleware = self.input_middleware
         
@@ -124,26 +103,21 @@ class TopKNodeRunner:
             logger.info(f"Procesadas {processed_count} líneas en batch")
     
     def _handle_eof_message(self, dto: TransactionBatchDTO) -> bool:
-        """Maneja mensaje EOF con coordinación entre TopK intermedios."""
         try:
             if self.is_final:
-                # Nodo final: lógica original
                 should_send_results = self.topk_node.increment_eof_count()
                 
                 if should_send_results:
                     logger.info("Generando y enviando resultados TopK")
                     
-                    # Generar resultados CSV
                     results_csv = self.topk_node.generate_results_csv()
                     
-                    # Enviar datos
                     result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
                     self.output_middleware.send(
                         result_dto.to_bytes_fast(),
                         routing_key=self.topk_node.get_output_routing_key()
                     )
                     
-                    # Enviar EOF
                     eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
                     self.output_middleware.send(
                         eof_dto.to_bytes_fast(),
@@ -155,13 +129,11 @@ class TopKNodeRunner:
                 
                 return False
             else:
-                # Nodo intermedio: coordinación EOF con contador
                 eof_data = dto.data.strip()
                 counter = int(eof_data.split(':')[1]) if ':' in eof_data else 1
                 
                 logger.info(f"EOF recibido con counter={counter}, total={self.total_nodes}")
                 
-                # Enviar datos de ESTE nodo TopK intermedio
                 results_csv = self.topk_node.generate_results_csv()
                 
                 logger.info(f"Enviando datos TopK intermedios:")
@@ -174,7 +146,6 @@ class TopKNodeRunner:
                     routing_key=self.topk_node.get_output_routing_key()
                 )
                 
-                # TODOS los nodos TopK intermedios envían EOF al TopK final
                 eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
                 self.output_middleware.send(
                     eof_dto.to_bytes_fast(),
@@ -182,7 +153,6 @@ class TopKNodeRunner:
                 )
                 logger.info("EOF enviado a TopK final")
                 
-                # Solo reenviar EOF para coordinación si no es el último
                 if counter < self.total_nodes:
                     new_counter = counter + 1
                     eof_dto_requeue = TransactionBatchDTO(f"EOF:{new_counter}", BatchType.EOF)
@@ -191,7 +161,7 @@ class TopKNodeRunner:
                     logger.info(f"EOF:{new_counter} reenviado a input queue para coordinación")
                 
                 logger.info("Datos TopK enviados - cerrando nodo")
-                return True  # SIEMPRE cerrar después de procesar EOF
+                return True  
             
         except Exception as e:
             logger.error(f"Error manejando EOF: {e}")

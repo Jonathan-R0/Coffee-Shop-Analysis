@@ -16,7 +16,7 @@ class ReportGenerator:
         self.input_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.report_exchange,
-            route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof']
+            route_keys=['q1.data', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof']
         )
         
         self.csv_files = {}  # Para múltiples archivos

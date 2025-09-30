@@ -288,8 +288,9 @@ class JoinNode:
                 missing_users.add(user_id)
                 birthdate = 'UNKNOWN'
             
-            # Formato final: solo store_name y birthdate
+            # Formato final: store_name, birthdate con store_id para sorting
             joined_record = {
+                'store_id': store_id,  # Agregar para sorting
                 'store_name': store_name,
                 'birthdate': birthdate
             }
@@ -395,9 +396,12 @@ class JoinNode:
                 logger.warning("No hay datos de top customers joinados para enviar")
                 return
             
+            # Ordenar por store_id para mantener el orden esperado por pandas
+            sorted_top_customers = sorted(joined_top_customers, key=lambda x: int(x['store_id']))
+            
             # Formato final: store_name,birthdate
             csv_lines = ["store_name,birthdate"]
-            for record in joined_top_customers:
+            for record in sorted_top_customers:
                 csv_lines.append(f"{record['store_name']},{record['birthdate']}")
             
             results_csv = '\n'.join(csv_lines)

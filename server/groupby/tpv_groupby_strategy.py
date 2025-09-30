@@ -3,17 +3,31 @@ from collections import defaultdict
 from typing import Dict, Tuple
 from base_strategy import GroupByStrategy
 from tpv_aggregation import TPVAggregation
+from dtos.dto import TransactionBatchDTO, BatchType
+from rabbitmq.middleware import MessageMiddlewareExchange
 
 logger = logging.getLogger(__name__)
 
 
 class TPVGroupByStrategy(GroupByStrategy):
-    
     def __init__(self, semester: str):
         super().__init__()
         self.semester = semester
         self.tpv_aggregations: Dict[Tuple[str, str], TPVAggregation] = defaultdict(TPVAggregation)
         logger.info(f"TPVGroupByStrategy inicializada para semestre {semester}")
+    
+    def setup_output_middleware(self, rabbitmq_host: str, output_exchange: str):
+        
+        output_middleware = MessageMiddlewareExchange(
+            host=rabbitmq_host,
+            exchange_name=output_exchange,
+            route_keys=['tpv.data', 'tpv.eof']
+        )
+        
+        logger.info(f"  Output exchange: {output_exchange}")
+        logger.info(f"  Routing keys: tpv.data, tpv.eof")
+        
+        return {"output": output_middleware}
     
     def process_csv_line(self, csv_line: str):
         try:
@@ -35,24 +49,35 @@ class TPVGroupByStrategy(GroupByStrategy):
             logger.warning(f"Error procesando línea para TPV: {e}")
     
     def generate_results_csv(self) -> str:
-
         if not self.tpv_aggregations:
             logger.warning("No hay datos TPV para generar resultados")
             return "year_half_created_at,store_id,total_payment_value,transaction_count"
         
         csv_lines = ["year_half_created_at,store_id,total_payment_value,transaction_count"]
         
-        sorted_keys = sorted(self.tpv_aggregations.keys())
-        
-        for (year_half, store_id) in sorted_keys:
+        for (year_half, store_id) in sorted(self.tpv_aggregations.keys()):
             aggregation = self.tpv_aggregations[(year_half, store_id)]
             csv_lines.append(aggregation.to_csv_line(year_half, store_id))
         
         logger.info(f"Resultados TPV generados para {len(self.tpv_aggregations)} grupos")
         return '\n'.join(csv_lines)
     
-    def get_output_routing_key(self) -> str:
-        return 'tpv.data'
-    
-    def get_eof_routing_key(self) -> str:
-        return 'tpv.eof'
+    def handle_eof_message(self, dto: TransactionBatchDTO, middlewares: dict) -> bool:
+        logger.info("EOF recibido. Generando resultados TPV finales")
+        
+        results_csv = self.generate_results_csv()
+        
+        result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
+        middlewares["output"].send(
+            result_dto.to_bytes_fast(),
+            routing_key='tpv.data'
+        )
+        
+        eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+        middlewares["output"].send(
+            eof_dto.to_bytes_fast(),
+            routing_key='tpv.eof'
+        )
+        
+        logger.info("Resultados TPV enviados al siguiente nodo")
+        return True

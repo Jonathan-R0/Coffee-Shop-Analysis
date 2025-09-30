@@ -42,7 +42,6 @@ class TopKNode:
             
             self.store_user_purchases[store_id][user_id] += purchases_qty
             
-            # Print para debugging en modo final
             if self.is_final:
                 print(f"[TOPK FINAL] Procesando: Store {store_id}, User {user_id}, Qty {purchases_qty}")
             
@@ -56,7 +55,6 @@ class TopKNode:
         self.eof_count += 1
         logger.info(f"EOF recibido: {self.eof_count}/{self.total_nodes}")
         
-        # Print para modo final
         print(f"[TOPK FINAL] EOF recibido {self.eof_count}/{self.total_nodes}")
         if self.eof_count >= self.total_nodes:
             print(f"[TOPK FINAL] Todos los nodos TopK intermedios han terminado. Procesando resultado final...")
@@ -76,14 +74,12 @@ class TopKNode:
         for store_id in sorted(self.store_user_purchases.keys()):
             user_purchases = self.store_user_purchases[store_id]
             
-            # Ordenar por purchases_qty (descendente) y luego por user_id (ascendente) para desempate determinístico
-            # Esto replica el comportamiento de pandas: sort_values(by=["store_id", "purchases_qty"], ascending=[True, False])
+
             sorted_users = sorted(
                 user_purchases.items(),
-                key=lambda x: (-x[1], int(float(x[0].replace('.0', '')))),  # -purchases_qty, +user_id_as_int
+                key=lambda x: (-x[1], int(float(x[0].replace('.0', '')))),  
             )
             
-            # Tomar top 3
             top_3 = sorted_users[:3]
             
             for user_id, purchases_qty in top_3:
@@ -92,7 +88,6 @@ class TopKNode:
         result = '\n'.join(csv_lines)
         logger.info(f"Top 3 calculado para {len(self.store_user_purchases)} tiendas")
         
-        # Print detallado para modo final
         if self.is_final:
             print(f"\n[TOPK FINAL] Resultado final enviado al JOIN:")
             print("="*50)
@@ -108,10 +103,10 @@ class TopKNode:
     
     def get_output_routing_key(self) -> str:
         if self.is_final:
-            return 'top_customers.data'  # Para el join
+            return 'top_customers.data'
         return 'topk.local.data'
     
     def get_eof_routing_key(self) -> str:
         if self.is_final:
-            return 'top_customers.eof'   # Para el join
+            return 'top_customers.eof' 
         return 'topk.local.eof'
