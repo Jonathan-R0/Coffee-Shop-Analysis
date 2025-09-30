@@ -1,6 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,7 @@ class NodeConfigurator(ABC):
     
     @abstractmethod
     def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str], 
-                                  output_q4: Optional[str] = None) -> Tuple:
+                                  output_q4: Optional[str] = None) -> Dict[str, Any]:
         pass
     
     @abstractmethod
@@ -19,11 +19,9 @@ class NodeConfigurator(ABC):
         pass
     
     @abstractmethod
-    def send_data(self, data: str, output_middleware, output_exchange_middleware, 
-                 output_middleware_exchange, output_q4_middleware=None):
+    def send_data(self, data: str, middlewares: Dict[str, Any]):
         pass
     
     @abstractmethod
-    def send_eof(self, output_middleware, output_exchange_middleware, 
-                output_middleware_exchange, output_q4_middleware=None):
+    def send_eof(self, middlewares: Dict[str, Any]):
         pass

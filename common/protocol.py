@@ -383,3 +383,21 @@ class Protocol:
         except Exception as e:
             logger.error(f"Error enviando FINISH: {e}")
             return False
+        
+        
+    def _flush_socket_buffer(self):
+        """Limpia cualquier dato pendiente en el buffer del socket."""
+        try:
+            self.conn.settimeout(0.1)  # Timeout muy corto
+            while True:
+                try:
+                    data = self.conn.recv(1024)
+                    if not data:
+                        break
+                    logger.info(f"DEBUG: Descartando datos residuales del buffer: {len(data)} bytes")
+                except socket.timeout:
+                    break
+        except Exception as e:
+            logger.info(f"DEBUG: Error limpiando buffer (normal): {e}")
+        finally:
+            self.conn.settimeout(None)  # Restaurar timeout original

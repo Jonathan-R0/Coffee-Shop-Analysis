@@ -73,7 +73,7 @@ services:
       - FILTER_MODE=year
       - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=3
+      - TOTAL_YEAR_FILTERS=5
       - FILTER_YEARS=2024,2025
       - OUTPUT_Q4=year_filtered_q4
     volumes:
@@ -94,7 +94,7 @@ services:
       - FILTER_MODE=year
       - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=3
+      - TOTAL_YEAR_FILTERS=5
       - FILTER_YEARS=2024,2025
       - OUTPUT_Q4=year_filtered_q4
     volumes:
@@ -115,7 +115,49 @@ services:
       - FILTER_MODE=year
       - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=3
+      - TOTAL_YEAR_FILTERS=5
+      - FILTER_YEARS=2024,2025
+      - OUTPUT_Q4=year_filtered_q4
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_4:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=5
+      - FILTER_YEARS=2024,2025
+      - OUTPUT_Q4=year_filtered_q4
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_5:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_5
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=5
       - FILTER_YEARS=2024,2025
       - OUTPUT_Q4=year_filtered_q4
     volumes:
@@ -136,7 +178,7 @@ services:
       - FILTER_MODE=hour
       - INPUT_QUEUE=year_filtered
       - OUTPUT_Q1=hour_filtered
-      - TOTAL_HOUR_FILTERS=3
+      - TOTAL_HOUR_FILTERS=5
       - FILTER_HOURS=06:00-22:59
       - OUTPUT_Q3=groupby.join.exchange
     volumes:
@@ -157,7 +199,7 @@ services:
       - FILTER_MODE=hour
       - INPUT_QUEUE=year_filtered
       - OUTPUT_Q1=hour_filtered
-      - TOTAL_HOUR_FILTERS=3
+      - TOTAL_HOUR_FILTERS=5
       - FILTER_HOURS=06:00-22:59
       - OUTPUT_Q3=groupby.join.exchange
     volumes:
@@ -178,7 +220,49 @@ services:
       - FILTER_MODE=hour
       - INPUT_QUEUE=year_filtered
       - OUTPUT_Q1=hour_filtered
-      - TOTAL_HOUR_FILTERS=3
+      - TOTAL_HOUR_FILTERS=5
+      - FILTER_HOURS=06:00-22:59
+      - OUTPUT_Q3=groupby.join.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_4:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=5
+      - FILTER_HOURS=06:00-22:59
+      - OUTPUT_Q3=groupby.join.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_hour_5:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_5
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS=5
       - FILTER_HOURS=06:00-22:59
       - OUTPUT_Q3=groupby.join.exchange
     volumes:
@@ -199,7 +283,6 @@ services:
       - SEMESTER=1
       - INPUT_Q3=groupby.join.exchange
       - TOTAL_GROUPBY_NODES=2
-      - JOIN_EXCHANGE=join.exchange
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -218,7 +301,6 @@ services:
       - SEMESTER=2
       - INPUT_Q3=groupby.join.exchange
       - TOTAL_GROUPBY_NODES=2
-      - JOIN_EXCHANGE=join.exchange
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -237,7 +319,7 @@ services:
       - FILTER_MODE=amount
       - INPUT_QUEUE=hour_filtered
       - OUTPUT_Q1=report.exchange
-      - TOTAL_AMOUNT_FILTERS=3
+      - TOTAL_AMOUNT_FILTERS=5
       - MIN_AMOUNT=75
     volumes:
       - ./server/config.ini:/app/config.ini
@@ -257,7 +339,7 @@ services:
       - FILTER_MODE=amount
       - INPUT_QUEUE=hour_filtered
       - OUTPUT_Q1=report.exchange
-      - TOTAL_AMOUNT_FILTERS=3
+      - TOTAL_AMOUNT_FILTERS=5
       - MIN_AMOUNT=75
     volumes:
       - ./server/config.ini:/app/config.ini
@@ -277,7 +359,47 @@ services:
       - FILTER_MODE=amount
       - INPUT_QUEUE=hour_filtered
       - OUTPUT_Q1=report.exchange
-      - TOTAL_AMOUNT_FILTERS=3
+      - TOTAL_AMOUNT_FILTERS=5
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount_4:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=report.exchange
+      - TOTAL_AMOUNT_FILTERS=5
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_amount_5:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_5
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=report.exchange
+      - TOTAL_AMOUNT_FILTERS=5
       - MIN_AMOUNT=75
     volumes:
       - ./server/config.ini:/app/config.ini
@@ -314,9 +436,9 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - INPUT_EXCHANGE=join.exchange
       - OUTPUT_EXCHANGE=report.exchange
+      - EXPECTED_GROUPBY_NODES=2
     volumes:
       - ./server/config.ini:/app/config.ini
-
 
   groupby_top_customers_1:
     build:
@@ -331,8 +453,9 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       - GROUPBY_MODE=top_customers
-      - INPUT_QUEUE=year_filtered_q4 
-      - TOTAL_GROUPBY_NODES=3
+      - INPUT_QUEUE=year_filtered_q4
+      - TOTAL_GROUPBY_NODES=5
+      - OUTPUT_EXCHANGE=aggregated.exchange
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -349,9 +472,9 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       - GROUPBY_MODE=top_customers
-      - INPUT_EXCHANGE=year_filtered_q4 
+      - INPUT_QUEUE=year_filtered_q4
+      - TOTAL_GROUPBY_NODES=5
       - OUTPUT_EXCHANGE=aggregated.exchange
-      - TOTAL_GROUPBY_NODES=3
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -368,9 +491,47 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       - GROUPBY_MODE=top_customers
-      - INPUT_EXCHANGE=year_filtered_q4 
+      - INPUT_QUEUE=year_filtered_q4
+      - TOTAL_GROUPBY_NODES=5
       - OUTPUT_EXCHANGE=aggregated.exchange
-      - TOTAL_GROUPBY_NODES=3
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_top_customers_4:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_top_customers_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=top_customers
+      - INPUT_QUEUE=year_filtered_q4
+      - TOTAL_GROUPBY_NODES=5
+      - OUTPUT_EXCHANGE=aggregated.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_top_customers_5:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_top_customers_5
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=top_customers
+      - INPUT_QUEUE=year_filtered_q4
+      - TOTAL_GROUPBY_NODES=5
+      - OUTPUT_EXCHANGE=aggregated.exchange
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -388,9 +549,9 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - TOPK_MODE=intermediate
       - TOPK_NODE_ID=1
-      - INPUT_QUEUE=aggregated_data
+      - INPUT_EXCHANGE=aggregated.exchange
       - OUTPUT_EXCHANGE=topk.exchange
-      - TOTAL_TOPK_NODES=2
+      - TOTAL_TOPK_NODES=5
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -408,9 +569,69 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - TOPK_MODE=intermediate
       - TOPK_NODE_ID=2
-      - INPUT_QUEUE=aggregated_data
+      - INPUT_EXCHANGE=aggregated.exchange
       - OUTPUT_EXCHANGE=topk.exchange
-      - TOTAL_TOPK_NODES=2
+      - TOTAL_TOPK_NODES=5
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  topk_intermediate_3:
+    build:
+      context: .
+      dockerfile: ./server/aggregator/Dockerfile
+    container_name: topk_intermediate_3
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - TOPK_MODE=intermediate
+      - TOPK_NODE_ID=3
+      - INPUT_EXCHANGE=aggregated.exchange
+      - OUTPUT_EXCHANGE=topk.exchange
+      - TOTAL_TOPK_NODES=5
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  topk_intermediate_4:
+    build:
+      context: .
+      dockerfile: ./server/aggregator/Dockerfile
+    container_name: topk_intermediate_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - TOPK_MODE=intermediate
+      - TOPK_NODE_ID=4
+      - INPUT_EXCHANGE=aggregated.exchange
+      - OUTPUT_EXCHANGE=topk.exchange
+      - TOTAL_TOPK_NODES=5
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  topk_intermediate_5:
+    build:
+      context: .
+      dockerfile: ./server/aggregator/Dockerfile
+    container_name: topk_intermediate_5
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - TOPK_MODE=intermediate
+      - TOPK_NODE_ID=5
+      - INPUT_EXCHANGE=aggregated.exchange
+      - OUTPUT_EXCHANGE=topk.exchange
+      - TOTAL_TOPK_NODES=5
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -428,7 +649,7 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - TOPK_MODE=final
       - TOPK_NODE_ID=final
-      - TOTAL_TOPK_NODES=2
+      - TOTAL_TOPK_NODES=5
       - INPUT_EXCHANGE=topk.exchange
       - OUTPUT_EXCHANGE=join.exchange
     volumes:

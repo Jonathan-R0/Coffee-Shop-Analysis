@@ -3,6 +3,9 @@ from collections import defaultdict
 from typing import Dict, Tuple
 from base_strategy import GroupByStrategy
 from tpv_aggregation import TPVAggregation
+from dtos.dto import TransactionBatchDTO, BatchType
+from rabbitmq.middleware import MessageMiddlewareExchange
+
 
 logger = logging.getLogger(__name__)
 
@@ -56,3 +59,38 @@ class TPVGroupByStrategy(GroupByStrategy):
     
     def get_eof_routing_key(self) -> str:
         return 'tpv.eof'
+    
+    def setup_output_middleware(self, rabbitmq_host: str, output_exchange: str):
+        
+        output_routing_keys = [
+            self.get_output_routing_key(),
+            self.get_eof_routing_key()
+        ]
+        
+        output_middleware = MessageMiddlewareExchange(
+            host=rabbitmq_host,
+            exchange_name=output_exchange,
+            route_keys=output_routing_keys
+        )
+        
+        return {"output_middleware": output_middleware}
+    
+    def handle_eof_message(self, dto: TransactionBatchDTO, middlewares: dict) -> bool:
+        logger.info("EOF recibido. Generando resultados TPV finales")
+        
+        results_csv = self.generate_results_csv()
+        
+        result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
+        middlewares["output_middleware"].send(
+            result_dto.to_bytes_fast(),
+            routing_key=self.get_output_routing_key()
+        )
+        
+        eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+        middlewares["output_middleware"].send(
+            eof_dto.to_bytes_fast(),
+            routing_key=self.get_eof_routing_key()
+        )
+        
+        logger.info("Resultados TPV enviados al siguiente nodo")
+        return True

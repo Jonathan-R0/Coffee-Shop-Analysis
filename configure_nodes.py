@@ -58,6 +58,7 @@ def base_services_setup(f):
         "      - RABBITMQ_HOST=rabbitmq\n"
         "      - OUTPUT_QUEUE=raw_data\n"
         "      - REPORTS_EXCHANGE=reports_exchange\n"
+        "      - STORE_EXCHANGE=join.exchange\n"
         "    volumes:\n"
         "      - ./server/config.ini:/app/config.ini\n\n"
     )
@@ -94,6 +95,7 @@ def filter_service_setup(f, filter_type, instance_id, input_queue, output_queue=
     # Configuraciones específicas por tipo de filtro
     if filter_type == 'year':
         f.write("      - FILTER_YEARS=2024,2025\n")
+        f.write("      - OUTPUT_Q4=year_filtered_q4\n")
     elif filter_type == 'hour':
         f.write("      - FILTER_HOURS=06:00-22:59\n")
         # Los filtros hour son donde se ramifica: query 1 (amount) y query 3 (groupby)
@@ -132,7 +134,7 @@ def groupby_service_setup(f, semester):
     )
 
 
-def report_generator_service_setup(f, input_queue):
+def report_generator_service_setup(f):
     """Escribe el servicio de report_generator."""
     f.write(
         f"  report_generator:\n"
@@ -147,12 +149,112 @@ def report_generator_service_setup(f, input_queue):
         f"    environment:\n"
         f"      - PYTHONUNBUFFERED=1\n"
         f"      - RABBITMQ_HOST=rabbitmq\n"
-        f"      - INPUT_QUEUE={input_queue}\n"
-        f"      - OUTPUT_EXCHANGE=reports_exchange\n"
-        f"      - QUERY_TYPE={query_type}\n"
+        f"      - INPUT_EXCHANGE=report.exchange\n"
+        f"      - REPORTS_EXCHANGE=reports_exchange\n"
         f"    volumes:\n"
         f"      - ./server/config.ini:/app/config.ini\n"
         f"      - ./reports:/app/reports\n\n"
+    )
+
+
+def join_node_service_setup(f):
+    """Escribe el servicio de join_node."""
+    f.write(
+        f"  join_node:\n"
+        f"    build:\n"
+        f"      context: .\n"
+        f"      dockerfile: ./server/join/Dockerfile\n"
+        f"    container_name: join_node\n"
+        f"    restart: on-failure\n"
+        f"    depends_on:\n"
+        f"      rabbitmq:\n"
+        f"        condition: service_healthy\n"
+        f"    environment:\n"
+        f"      - PYTHONUNBUFFERED=1\n"
+        f"      - RABBITMQ_HOST=rabbitmq\n"
+        f"      - INPUT_EXCHANGE=join.exchange\n"
+        f"      - OUTPUT_EXCHANGE=report.exchange\n"
+        f"      - EXPECTED_GROUPBY_NODES=2\n"
+        f"    volumes:\n"
+        f"      - ./server/config.ini:/app/config.ini\n\n"
+    )
+
+
+def groupby_top_customers_service_setup(f, instance_id, total_count):
+    """Escribe un servicio de groupby para top customers (Query 4)."""
+    service_name = f"groupby_top_customers_{instance_id}"
+    
+    f.write(
+        f"  {service_name}:\n"
+        f"    build:\n"
+        f"      context: .\n"
+        f"      dockerfile: ./server/groupby/Dockerfile\n"
+        f"    container_name: {service_name}\n"
+        f"    restart: on-failure\n"
+        f"    depends_on:\n"
+        f"      rabbitmq:\n"
+        f"        condition: service_healthy\n"
+        f"    environment:\n"
+        f"      - PYTHONUNBUFFERED=1\n"
+        f"      - RABBITMQ_HOST=rabbitmq\n"
+        f"      - GROUPBY_MODE=top_customers\n"
+        f"      - INPUT_QUEUE=year_filtered_q4\n"
+        f"      - TOTAL_GROUPBY_NODES={total_count}\n"
+        f"      - OUTPUT_EXCHANGE=aggregated.exchange\n"
+        f"    volumes:\n"
+        f"      - ./server/config.ini:/app/config.ini\n\n"
+    )
+
+
+def topk_intermediate_service_setup(f, instance_id, total_count):
+    """Escribe un servicio de TopK intermediate."""
+    service_name = f"topk_intermediate_{instance_id}"
+    
+    f.write(
+        f"  {service_name}:\n"
+        f"    build:\n"
+        f"      context: .\n"
+        f"      dockerfile: ./server/aggregator/Dockerfile\n"
+        f"    container_name: {service_name}\n"
+        f"    restart: on-failure\n"
+        f"    depends_on:\n"
+        f"      rabbitmq:\n"
+        f"        condition: service_healthy\n"
+        f"    environment:\n"
+        f"      - PYTHONUNBUFFERED=1\n"
+        f"      - RABBITMQ_HOST=rabbitmq\n"
+        f"      - TOPK_MODE=intermediate\n"
+        f"      - TOPK_NODE_ID={instance_id}\n"
+        f"      - INPUT_EXCHANGE=aggregated.exchange\n"
+        f"      - OUTPUT_EXCHANGE=topk.exchange\n"
+        f"      - TOTAL_TOPK_NODES={total_count}\n"
+        f"    volumes:\n"
+        f"      - ./server/config.ini:/app/config.ini\n\n"
+    )
+
+
+def topk_final_service_setup(f, total_intermediate_count):
+    """Escribe el servicio de TopK final."""
+    f.write(
+        f"  topk_final:\n"
+        f"    build:\n"
+        f"      context: .\n"
+        f"      dockerfile: ./server/aggregator/Dockerfile\n"
+        f"    container_name: topk_final\n"
+        f"    restart: on-failure\n"
+        f"    depends_on:\n"
+        f"      rabbitmq:\n"
+        f"        condition: service_healthy\n"
+        f"    environment:\n"
+        f"      - PYTHONUNBUFFERED=1\n"
+        f"      - RABBITMQ_HOST=rabbitmq\n"
+        f"      - TOPK_MODE=final\n"
+        f"      - TOPK_NODE_ID=final\n"
+        f"      - TOTAL_TOPK_NODES={total_intermediate_count}\n"
+        f"      - INPUT_EXCHANGE=topk.exchange\n"
+        f"      - OUTPUT_EXCHANGE=join.exchange\n"
+        f"    volumes:\n"
+        f"      - ./server/config.ini:/app/config.ini\n\n"
     )
 
 def determine_queue_configuration(year_count, hour_count, amount_count, report_generator=True):
@@ -175,8 +277,8 @@ def determine_queue_configuration(year_count, hour_count, amount_count, report_g
     
     if amount_count > 0:
         input_queue = current_input if (year_count > 0 or hour_count > 0) else "raw_data"
-        config['amount'] = {'input': input_queue, 'output': "final_data" if report_generator else None}
-        current_input = "final_data"
+        config['amount'] = {'input': input_queue, 'output': "report.exchange"}
+        current_input = "report.exchange"
     
     # Si no hay filtros pero hay report_generator, toma directamente de raw_data
     if report_generator and year_count == 0 and hour_count == 0 and amount_count == 0:
@@ -187,7 +289,8 @@ def determine_queue_configuration(year_count, hour_count, amount_count, report_g
     
     return config
 
-def setup_docker_compose(filename, year_count, hour_count, amount_count, include_report_generator=True):
+def setup_docker_compose(filename, year_count, hour_count, amount_count, include_report_generator=True, 
+                         groupby_top_customers_count=3, topk_intermediate_count=2):
     """Genera el archivo docker-compose.yaml completo."""
     with open(filename, 'w') as f:
         # Servicios base
@@ -224,12 +327,27 @@ def setup_docker_compose(filename, year_count, hour_count, amount_count, include
         
         # Generar servicio de report_generator
         if include_report_generator:
-            input_queue = queue_config['report_generator']['input']
-            report_generator_service_setup(f, input_queue)
+            report_generator_service_setup(f)
+        
+        # Agregar servicio join_node
+        join_node_service_setup(f)
+        
+        # Generar servicios para Query 4 (Top Customers)
+        # GroupBy top customers
+        for i in range(1, groupby_top_customers_count + 1):
+            groupby_top_customers_service_setup(f, i, groupby_top_customers_count)
+        
+        # TopK intermediate nodes
+        for i in range(1, topk_intermediate_count + 1):
+            topk_intermediate_service_setup(f, i, topk_intermediate_count)
+        
+        # TopK final node
+        topk_final_service_setup(f, topk_intermediate_count)
 
 def main():
-    if len(sys.argv) < 5 or len(sys.argv) > 6:
-        print("Uso: python configure_nodes.py <nombre_archivo> <cant_year> <cant_hour> <cant_amount> [include_report_generator]")
+    if len(sys.argv) < 5 or len(sys.argv) > 8:
+        print("Uso: python configure_nodes.py <nombre_archivo> <cant_year> <cant_hour> <cant_amount> [include_report_generator] [groupby_top_customers] [topk_intermediate]")
+        print("Ejemplo: python configure_nodes.py docker-compose.yaml 3 3 3 true 3 2")
         sys.exit(1)
 
     nombre_archivo = sys.argv[1]
@@ -239,13 +357,26 @@ def main():
     
     # Por defecto incluir report_generator, a menos que se especifique false
     include_report_generator = True
-    if len(sys.argv) == 6:
+    if len(sys.argv) >= 6:
         include_report_generator = sys.argv[5].lower() not in ['false', '0', 'no']
+    
+    # Parámetros para Query 4
+    groupby_top_customers_count = 3
+    if len(sys.argv) >= 7:
+        groupby_top_customers_count = int(sys.argv[6])
+    
+    topk_intermediate_count = 2
+    if len(sys.argv) >= 8:
+        topk_intermediate_count = int(sys.argv[7])
 
-    setup_docker_compose(nombre_archivo, cant_year, cant_hour, cant_amount, include_report_generator)
+    setup_docker_compose(nombre_archivo, cant_year, cant_hour, cant_amount, include_report_generator,
+                         groupby_top_customers_count, topk_intermediate_count)
     print(f"Archivo '{nombre_archivo}' generado exitosamente!")
     print(f"Filtros year: {cant_year}, hour: {cant_hour}, amount: {cant_amount}")
-    print(f"GroupBy nodes: 2 (semester 1 y semester 2)")
+    print(f"GroupBy nodes (Q3): 2 (semester 1 y semester 2)")
+    print(f"GroupBy nodes (Q4): {groupby_top_customers_count} (top customers)")
+    print(f"TopK intermediate: {topk_intermediate_count}")
+    print(f"TopK final: 1")
     if include_report_generator:
         print("Report generator: incluido")
     else:

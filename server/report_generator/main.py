@@ -11,6 +11,7 @@ class ReportGenerator:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.report_exchange = os.getenv('REPORT_EXCHANGE', 'report.exchange')
+        self.to_gateway_report_exchange = os.getenv('REPORT_EXCHANGE', 'reports_exchange')
         
         self.input_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
@@ -55,8 +56,8 @@ class ReportGenerator:
     def on_message_callback(self, ch, method, properties, body):
         """Callback para RabbitMQ cuando llega un mensaje."""
         try:
-            routing_key = method.routing_key  # ✅ Obtener routing key
-            should_stop = self.process_message(body, routing_key)  # ✅ Pasar routing key
+            routing_key = method.routing_key  
+            should_stop = self.process_message(body, routing_key)  
             
             if should_stop:
                 logger.info("Todos los reportes generados - deteniendo consuming")

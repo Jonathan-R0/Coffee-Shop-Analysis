@@ -19,7 +19,3 @@ class NodeConfiguratorFactory:
             raise ValueError(f"Unknown filter mode: {filter_mode}")
         
         return configurator_class(rabbitmq_host)
-    
-    @staticmethod
-    def register_configurator(filter_mode: str, configurator_class: type):
-        NodeConfiguratorFactory._configurators[filter_mode] = configurator_class

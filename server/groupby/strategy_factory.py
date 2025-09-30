@@ -5,9 +5,7 @@ from tpv_groupby_strategy import TPVGroupByStrategy
 from top_customers_groupby_strategy import TopCustomersGroupByStrategy
 
 
-class GroupByStrategyFactory:
-    """Factory para crear estrategias de agrupación."""
-    
+class GroupByStrategyFactory:    
     _strategies = {
         'tpv': TPVGroupByStrategy,
         'top_customers': TopCustomersGroupByStrategy
@@ -36,10 +34,8 @@ class GroupByStrategyFactory:
     
     @staticmethod
     def register_strategy(groupby_mode: str, strategy_class: type):
-        """Registra una nueva estrategia."""
         GroupByStrategyFactory._strategies[groupby_mode] = strategy_class
     
     @staticmethod
     def get_available_strategies() -> List[str]:
-        """Retorna lista de estrategias disponibles."""
         return list(GroupByStrategyFactory._strategies.keys())

@@ -9,33 +9,21 @@ logger = logging.getLogger(__name__)
 
 
 class GroupByNode:
-    """
-    Nodo genérico de agrupación que delega lógica a estrategias.
-    Soporta dos modos de entrada:
-    - Exchange (para TPV con fanout por semestre)
-    - Queue (para top_customers con round-robin)
-    """
-    
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.groupby_mode = os.getenv('GROUPBY_MODE', 'tpv')
         
-        # Configuración de salida
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'join.exchange')
         
-        # Crear estrategia de agrupación
         self.groupby_strategy = self._create_groupby_strategy()
         
-        # Configurar middleware de entrada según el modo
         self._setup_input_middleware()
         
-        # Delegar configuración de salida a la estrategia
         self.output_middlewares = self.groupby_strategy.setup_output_middleware(
             self.rabbitmq_host,
             self.output_exchange
         )
         
-        # Para top_customers, agregar el input middleware para requeue de EOF
         if self.groupby_mode == 'top_customers':
             self.output_middlewares['input_queue'] = self.input_middleware
         
@@ -44,9 +32,7 @@ class GroupByNode:
         logger.info(f"  Output Exchange: {self.output_exchange}")
     
     def _setup_input_middleware(self):
-        """Configura entrada según el modo."""
         if self.groupby_mode == 'tpv':
-            # TPV: usa exchange con routing keys por semestre
             self.input_exchange = os.getenv('INPUT_EXCHANGE', 'groupby.join.exchange')
             semester = os.getenv('SEMESTER')
             if semester not in ['1', '2']:
@@ -64,7 +50,6 @@ class GroupByNode:
             logger.info(f"  Input Routing Keys: {self.input_routing_keys}")
         
         elif self.groupby_mode == 'top_customers':
-            # Top Customers: usa queue para round-robin
             self.input_queue = os.getenv('INPUT_QUEUE', 'year_filtered_q4')
             self.input_middleware = MessageMiddlewareQueue(
                 host=self.rabbitmq_host,
@@ -74,7 +59,6 @@ class GroupByNode:
             logger.info(f"  Input Queue: {self.input_queue} (round-robin)")
     
     def _create_groupby_strategy(self):
-        """Crea la estrategia apropiada."""
         try:
             config = {}
             
@@ -95,7 +79,6 @@ class GroupByNode:
             raise
     
     def _process_csv_batch(self, csv_data: str):
-        """Procesa batch de CSV línea por línea."""
         processed_count = 0
         
         for line in csv_data.split('\n'):
@@ -110,18 +93,11 @@ class GroupByNode:
             logger.info(f"Procesadas {processed_count} líneas en batch")
     
     def process_message(self, message: bytes) -> bool:
-        """
-        Procesa un mensaje.
-        Returns True si debe detener el consuming.
-        """
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
             
             if dto.batch_type == BatchType.EOF:
-                if self.groupby_mode == 'top_customers':
-                    return self.groupby_strategy.handle_eof_message(dto, self.output_middlewares)
-                else:
-                    return self.groupby_strategy.handle_eof_message(self.output_middlewares)
+                return self.groupby_strategy.handle_eof_message(dto, self.output_middlewares)
             
             if dto.batch_type == BatchType.RAW_CSV:
                 self._process_csv_batch(dto.data)

@@ -14,6 +14,7 @@ class Client:
         self.client_socket = None
         self.protocol = None  
         self.processor = None
+        self.reports_ammount = 3
     
     def run(self):
         self.keep_running = True
