@@ -230,6 +230,21 @@ class MenuItemBatchDTO(BaseDTO):
             "available_from": values[4],
             "available_to": values[5]
         }
+        
+    def get_column_index(self, column_name: str) -> int:
+        column_map = {
+            'item_id': 0,
+            'item_name': 1,
+            'category': 2,
+            'is_seasonal': 3,
+            'available_from': 4,
+            'available_to': 5
+        }
+        
+        if column_name not in column_map:
+            raise ValueError(f"Columna '{column_name}' no existe en transaction_items")
+        
+        return column_map[column_name]
 
 
 class TransactionItemBatchDTO(BaseDTO):
@@ -253,6 +268,21 @@ class TransactionItemBatchDTO(BaseDTO):
             "subtotal": values[4],
             "created_at": values[5]
         }
+    
+    def get_column_index(self, column_name: str) -> int:
+        column_map = {
+            'transaction_id': 0,
+            'item_id': 1,
+            'quantity': 2,
+            'unit_price': 3,
+            'subtotal': 4,
+            'created_at': 5
+        }
+        
+        if column_name not in column_map:
+            raise ValueError(f"Columna '{column_name}' no existe en transaction_items")
+        
+        return column_map[column_name]
 
 
 class ReportBatchDTO(BaseDTO):

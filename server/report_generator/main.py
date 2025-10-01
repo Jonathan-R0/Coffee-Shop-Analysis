@@ -16,7 +16,8 @@ class ReportGenerator:
         self.input_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.report_exchange,
-            route_keys=['q1.data','q1.eof', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof']
+
+            route_keys=['q1.data', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof','q2_most_profit.data','q2_best_selling.data']
         )
         #Agregar o quitar queries según necesidad de Queries
         self.expected_queries = {'q1'
@@ -25,8 +26,8 @@ class ReportGenerator:
                                  }
         self.total_expected = len(self.expected_queries)
         
-        self.csv_files = {}  # Para múltiples archivos
-        self.eof_received = set()  # Tracking de EOF
+        self.csv_files = {}  
+        self.eof_received = set() 
         
         logger.info(f"ReportGenerator inicializado:")
         logger.info(f"  Exchange: {self.report_exchange}")
@@ -53,7 +54,6 @@ class ReportGenerator:
                         return True
                     else:
                         logger.warning(f"EOF count = 3 pero queries incorrectas: {self.eof_received}")
-                
                 return False
             
             # if routing_key.endswith('.data'):
@@ -81,12 +81,10 @@ class ReportGenerator:
             return False
 
     def on_message_callback(self, ch, method, properties, body):
-        """Callback para RabbitMQ cuando llega un mensaje."""
         try:
-            logger.info(f"Mensaje recibido con routing key: {method.routing_key}")
-            routing_key = method.routing_key  # ✅ Obtener routing key
-            should_stop = self.process_message(body, routing_key)  # ✅ Pasar routing key
-            
+            routing_key = method.routing_key  
+            should_stop = self.process_message(body, routing_key)  
+
             if should_stop:
                 logger.info("Todos los reportes generados - deteniendo consuming")
                 ch.stop_consuming()
@@ -108,7 +106,6 @@ class ReportGenerator:
 
     def _cleanup(self):
         try:
-            # Cerrar cualquier archivo CSV abierto
             for query_name in list(self.csv_files.keys()):
                 self._close_csv_file(query_name)
             
@@ -130,7 +127,6 @@ class ReportGenerator:
             
             self.csv_files[query_name] = open(filename, 'w', encoding='utf-8')
             
-            # Escribir header desde la primera línea del sample data
             header_line = sample_data.strip().split('\n')[0]
             self.csv_files[query_name].write(header_line + '\n')
             self.csv_files[query_name].flush()
@@ -144,26 +140,23 @@ class ReportGenerator:
     def _write_to_csv(self, csv_data: str, query_name: str):
         """Escribe datos al archivo CSV correspondiente."""
         try:
-            # Inicializar archivo si no existe
             if query_name not in self.csv_files:
                 self._initialize_csv_file(query_name, csv_data)
             
-            # Escribir datos (skip header)
             lines = csv_data.strip().split('\n')
             for line in lines:
                 line = line.strip()
                 if not line:
                     continue
                 
-                # Skip headers comunes
-                if any(header in line.lower() for header in ['transaction_id', 'year_half', 'store_name,birthdate']):
+                if any(header in line.lower() for header in ['transaction_id', 'year_half', 'store_name,birthdate', 'year_month_created_at', 'year_month_created_at', 'sellings_qty', 'profit_sum']):
                     continue
                 
                 self.csv_files[query_name].write(line + '\n')
             
             self.csv_files[query_name].flush()
             
-            processed_lines = len([l for l in lines if l.strip() and not any(h in l.lower() for h in ['transaction_id', 'year_half', 'store_name,birthdate'])])
+            processed_lines = len([l for l in lines if l.strip() and not any(h in l.lower() for h in ['transaction_id', 'year_half', 'store_name,birthdate','sellings_qty','profit_sum'])])
             if processed_lines > 0:
                 logger.info(f"Escritas {processed_lines} líneas en archivo {query_name}")
             
@@ -172,7 +165,6 @@ class ReportGenerator:
             raise
 
     def _close_csv_file(self, query_name: str):
-        """Cierra el archivo CSV para una query específica."""
         try:
             if query_name in self.csv_files:
                 self.csv_files[query_name].close()
@@ -182,7 +174,6 @@ class ReportGenerator:
             logger.error(f"Error cerrando el archivo CSV para {query_name}: {e}")
 
     def _publish_reports(self):
-        """Publica todos los reportes generados al exchange."""
         try:
             publisher = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
@@ -191,7 +182,9 @@ class ReportGenerator:
             )
             
             batch_size = 150
+
             for query_name in self.expected_queries:  # Las 3 queries activas
+
                 reports_dir = './reports'
                 files = [f for f in os.listdir(reports_dir) if f.startswith(query_name) and f.endswith('.csv')]
 
@@ -211,12 +204,10 @@ class ReportGenerator:
                             )
                             publisher.send(report_dto.to_bytes_fast(), routing_key=f'{query_name}.data')
                         
-                        # Enviar EOF para este query
                         eof_dto = ReportBatchDTO.create_eof(query_name)
                         publisher.send(eof_dto.to_bytes_fast(), routing_key=f'{query_name}.eof')
                         logger.info(f"Enviados {total_lines} líneas y EOF para {query_name}")
 
-            # publisher.close()
             logger.info("Todos los reportes publicados exitosamente")
             
         except Exception as e:

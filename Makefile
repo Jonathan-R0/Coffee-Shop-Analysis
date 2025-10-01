@@ -24,9 +24,14 @@ docker-compose-up: docker-image
 
 docker-compose-down:
 	docker compose -f docker-compose.yaml stop -t 1
-	docker compose -f docker-compose.yaml down
-# 	docker system prune -a --volumes
-	sudo rm -rf report*
+	docker compose -f docker-compose.yaml down -v
+	docker images --format "{{.Repository}}:{{.Tag}}" | grep -v "python" | xargs -r docker rmi -f || true
+	docker container prune -f
+	docker network prune -f
+	docker builder prune -f
+	docker volume prune -f
+	sudo rm -rf reports/*
+
 .PHONY: docker-compose-down
 
 docker-compose-logs:

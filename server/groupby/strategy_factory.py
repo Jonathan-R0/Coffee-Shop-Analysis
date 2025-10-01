@@ -3,6 +3,7 @@ from typing import List
 from base_strategy import GroupByStrategy
 from tpv_groupby_strategy import TPVGroupByStrategy
 from top_customers_groupby_strategy import TopCustomersGroupByStrategy
+from best_selling_groupby_strategy import BestSellingGroupByStrategy
 
 
 class GroupByStrategyFactory:
@@ -10,7 +11,8 @@ class GroupByStrategyFactory:
     
     _strategies = {
         'tpv': TPVGroupByStrategy,
-        'top_customers': TopCustomersGroupByStrategy
+        'top_customers': TopCustomersGroupByStrategy,
+        'best_selling': BestSellingGroupByStrategy
     }
     
     @staticmethod
@@ -30,6 +32,12 @@ class GroupByStrategyFactory:
             input_queue_name = config.get('input_queue_name')
             if not input_queue_name:
                 raise ValueError("input_queue_name is required for top_customers")
+            return strategy_class(input_queue_name)
+        
+        elif groupby_mode == 'best_selling':
+            input_queue_name = config.get('input_queue_name')
+            if not input_queue_name:
+                raise ValueError("input_queue_name is required for best_selling")
             return strategy_class(input_queue_name)
         
         return strategy_class(**config)

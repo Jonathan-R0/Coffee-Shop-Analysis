@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class HourNodeConfigurator(NodeConfigurator):
     def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str],
-                                  output_q4: Optional[str] = None) -> Dict[str, Any]:
+                                  output_q4: Optional[str] = None, output_q2: Optional[str] = None) -> Dict[str, Any]:
         middlewares = {}
         logger.info(f"Configurando middlewares de salida para HourNodeConfigurator {output_q1}, {output_q3}")
 
@@ -33,7 +33,7 @@ class HourNodeConfigurator(NodeConfigurator):
     def process_filtered_data(self, filtered_csv: str) -> str:
         return filtered_csv
     
-    def send_data(self, data: str, middlewares: Dict[str, Any]):
+    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions"):
         if 'q1' in middlewares:
             filtered_dto = TransactionBatchDTO(data, batch_type=BatchType.RAW_CSV)
             middlewares['q1'].send(filtered_dto.to_bytes_fast())
@@ -41,7 +41,7 @@ class HourNodeConfigurator(NodeConfigurator):
         if 'q3' in middlewares:
             self._send_to_exchange_by_semester(data, middlewares['q3'])
     
-    def send_eof(self, middlewares: Dict[str, Any]):
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions"):
         eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
         
         if 'q1' in middlewares:
