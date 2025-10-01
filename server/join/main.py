@@ -41,6 +41,7 @@ class JoinNode:
         self.top_customers_loaded = False
         self.expected_groupby_nodes = 2  # Semestre 1 y 2
         self.top_customers_sent = False  # Para evitar múltiples envíos de Q4
+        self.q3_results_sent = False  # ← AGREGAR ESTA LÍNEA
 
         self.store_dto_helper = StoreBatchDTO("", BatchType.RAW_CSV)
         self.user_dto_helper = UserBatchDTO("", BatchType.RAW_CSV)
@@ -243,13 +244,9 @@ class JoinNode:
 
     def _perform_top_customers_join(self):
         """
-        Hace JOIN entre stores, top customers y users data para generar tabla final.
-        Resultado: store_name, birthdate
+        Hace JOIN entre top customers y users data para generar tabla final.
+        Q4 NO necesita stores - puede usar store_id directamente.
         """
-        if not self.stores_data:
-            logger.warning("No hay datos de stores para hacer JOIN de top customers")
-            return
-        
         if not self.top_customers_data:
             logger.warning("No hay datos de top customers para hacer JOIN")
             return
@@ -260,25 +257,18 @@ class JoinNode:
         
         joined_top_customers = []
         joined_count = 0
-        missing_stores = set()
         missing_users = set()
         found_users = 0
-        
-        # Debug: mostrar algunos user_ids de top_customers y algunos de users
-        logger.info(f"Debug - Primeros 5 user_ids en top_customers: {[rec['user_id'] for rec in self.top_customers_data[:5]]}")
-        sample_user_ids = list(self.users_data.keys())[:5]
-        logger.info(f"Debug - Primeros 5 user_ids en users: {sample_user_ids}")
         
         for customer_record in self.top_customers_data:
             store_id = customer_record['store_id']
             user_id = customer_record['user_id']
             
-            # Buscar store name
-            if store_id in self.stores_data:
+            # Para Q4, usar store_id como store_name si no hay stores cargados
+            if self.stores_loaded and store_id in self.stores_data:
                 store_name = self.stores_data[store_id]['store_name']
             else:
-                missing_stores.add(store_id)
-                store_name = f"Store_{store_id}"
+                store_name = f"Store_{store_id}"  # Usar store_id como fallback
             
             # Buscar user birthday
             if user_id in self.users_data:
@@ -288,18 +278,14 @@ class JoinNode:
                 missing_users.add(user_id)
                 birthdate = 'UNKNOWN'
             
-            # Formato final: store_name, birthdate con store_id para sorting
             joined_record = {
-                'store_id': store_id,  # Agregar para sorting
+                'store_id': store_id,
                 'store_name': store_name,
                 'birthdate': birthdate
             }
             
             joined_top_customers.append(joined_record)
             joined_count += 1
-        
-        if missing_stores:
-            logger.warning(f"Stores no encontrados para top customers: {missing_stores}")
         
         logger.info(f"Users encontrados: {found_users}/{len(self.top_customers_data)} ({found_users/len(self.top_customers_data)*100:.1f}%)")
         
@@ -318,10 +304,11 @@ class JoinNode:
         self.stores_loaded = True
         
         # Query 3: Si hay datos TPV y todos los GroupBy han terminado, enviar Q3
-        if self.tpv_data and self.groupby_eof_count >= self.expected_groupby_nodes:
+        if self.tpv_data and self.groupby_eof_count >= self.expected_groupby_nodes and not self.q3_results_sent:
             self._perform_join()
             logger.info("Stores cargados y GroupBy completados - enviando resultados Q3")
             self._send_results_to_exchange()
+            self.q3_results_sent = True  # ← AGREGAR ESTA LÍNEA
         
         # Query 4: Si hay datos de top customers y users están cargados, enviar Q4
         if self.top_customers_data and self.users_loaded and not self.top_customers_sent:
@@ -331,58 +318,55 @@ class JoinNode:
 
         logger.info("Finalizando procesamiento por EOF de stores")
         return False  # No cerrar el nodo, puede haber más datos llegando
-    
+
     def _handle_user_eof(self):
         """Maneja EOF de datos de users."""
         logger.info("EOF recibido de datos de users")
         self.users_loaded = True
         
-        # Query 4: Solo enviar cuando stores y top customers estén cargados
-        if self.top_customers_data and self.stores_loaded and not self.top_customers_sent:
-            logger.info("Users, stores y top customers completados - enviando resultados Q4")
+        # Query 4: Solo necesita users y top_customers, NO stores
+        if self.top_customers_loaded and not self.top_customers_sent:
+            logger.info("Users y top customers completados - enviando resultados Q4")
             self._perform_top_customers_join()
             self.top_customers_sent = True
         else:
             missing = []
-            if not self.stores_loaded:
-                missing.append("stores")
-            if not self.top_customers_data:
+            if not self.top_customers_loaded:
                 missing.append("top_customers")
             logger.info(f"Users completado, esperando: {', '.join(missing)} para enviar Q4")
         
-        return False  # No cerrar el nodo
-    
+        return False  # No cerrar el nodo  
+      
     def _handle_tpv_eof(self):
         """Maneja EOF de los nodos GroupBy."""
         self.groupby_eof_count += 1
         logger.info(f"EOF TPV recibido: {self.groupby_eof_count}/{self.expected_groupby_nodes}")
         
         # Query 3: Solo enviar cuando todos los GroupBy hayan terminado Y stores estén cargados
-        if self.groupby_eof_count >= self.expected_groupby_nodes:
+        if self.groupby_eof_count >= self.expected_groupby_nodes and not self.q3_results_sent:
             if self.stores_loaded:
                 if not self.joined_data:  # Solo hacer JOIN si no se ha hecho ya
                     self._perform_join()
                 logger.info("Todos los GroupBy completados y stores cargados - enviando resultados Q3")
                 self._send_results_to_exchange()
+                self.q3_results_sent = True  # ← AGREGAR ESTA LÍNEA
             else:
                 logger.info("Todos los GroupBy completados, esperando EOF de stores para enviar Q3...")
         
         return False  # No cerrar el nodo
-    
+
     def _handle_top_customers_eof(self):
         """Maneja EOF de top customers."""
         logger.info("EOF recibido de top customers")
         self.top_customers_loaded = True
         
-        # Query 4: Solo enviar cuando stores y users estén cargados
-        if self.stores_loaded and self.users_loaded and not self.top_customers_sent:
-            logger.info("Top customers, stores y users completados - enviando resultados Q4")
+        # Query 4: Solo necesita users y top_customers, NO stores
+        if self.users_loaded and not self.top_customers_sent:
+            logger.info("Top customers y users completados - enviando resultados Q4")
             self._perform_top_customers_join()
             self.top_customers_sent = True
         else:
             missing = []
-            if not self.stores_loaded:
-                missing.append("stores")
             if not self.users_loaded:
                 missing.append("users")
             logger.info(f"Top customers completado, esperando EOF de: {', '.join(missing)} para enviar Q4")

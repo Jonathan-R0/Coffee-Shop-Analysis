@@ -40,9 +40,9 @@ class AmountNodeConfigurator(NodeConfigurator):
             eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
             middlewares['q1'].send(
                 eof_dto.to_bytes_fast(),
-                routing_key='q1.data'
+                routing_key='q1.eof'
             )
-            logger.info("EOF:1 enviado a Q1 exchange con routing key 'q1.data'")
+            logger.info("EOF:1 enviado a Q1 exchange con routing key 'q1.eof'")
 
     def _extract_q1_columns(self, csv_data: str) -> str:
         result_lines = ["transaction_id,final_amount"]

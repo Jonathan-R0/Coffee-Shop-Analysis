@@ -15,6 +15,8 @@ class Client:
         self.client_socket = None
         self.protocol = None  
         self.processor = None
+        #Modificar cuando quiera mas querys
+        self.expected_reports = 3
     
     def run(self):
         self.keep_running = True
@@ -108,11 +110,10 @@ class Client:
             logger.info("Esperando reportes del servidor...")
             
             # Esperamos recibir 3 reportes: Q1, Q3, Q4
-            expected_reports = 3
             reports_received = 0
             
-            while self.keep_running and reports_received < expected_reports:
-                logger.info(f"Esperando reporte {reports_received + 1} de {expected_reports}...")
+            while self.keep_running and reports_received < self.expected_reports:
+                logger.info(f"Esperando reporte {reports_received + 1} de {self.expected_reports}...")
                 
                 report = self.protocol.receive_report()  # ← Retorna dict
                 

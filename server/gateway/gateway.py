@@ -20,6 +20,13 @@ class Gateway:
         self._server_socket.bind(('', port))
         self._server_socket.listen(listener_backlog)
         self._is_running = False
+        #Modificar este valor para cantidad de Queries activas
+        self.max_expected_reports = 3
+        self.reports_config = [
+            ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
+            ('q3', self._convert_q3_to_csv, "Q3", "registros"),
+            ('q4', self._convert_q4_to_csv, "Q4", "cumpleanos")
+        ]
         self._middleware = MessageMiddlewareQueue(host=rabbitmq_host, queue_name=output_queue)
         self._reports_exchange = reports_exchange
         self._join_middleware = MessageMiddlewareExchange(
@@ -188,12 +195,8 @@ class Gateway:
                     eof_count += 1
                     logger.info(f"EOF recibido para {query_name}. Total EOF: {eof_count}")
                     
-                    # DEBUG: ¿Recibimos datos de Q4 antes del EOF?
-                    if query_name == "q4":
-                        logger.info(f"Q4 EOF recibido - datos acumulados: {len(report_data['q4'])}")
                     
-                    
-                    if eof_count >= 3:
+                    if eof_count >= self.max_expected_reports:
                         logger.info("Todos los reportes recibidos completamente")
                         ch.stop_consuming()
                     return
@@ -239,13 +242,8 @@ class Gateway:
     def _send_reports_to_client(self, protocol, report_data):
         """Envía todos los reportes al cliente."""
         # Mapeo de queries a convertidores y nombres
-        reports_config = [
-            ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
-            ('q3', self._convert_q3_to_csv, "Q3", "registros"),
-            ('q4', self._convert_q4_to_csv, "Q4", "registros")
-        ]
-        
-        for query_key, converter_func, report_name, unit_name in reports_config:
+
+        for query_key, converter_func, report_name, unit_name in self.reports_config:
             transactions = report_data[query_key]
             
             if transactions:
@@ -302,20 +300,6 @@ class Gateway:
         except Exception as e:
             logger.error(f"Error enviando reporte {report_name}: {e}")
 
-    # def _send_report_via_protocol(self, protocol, csv_content):
-    #     """
-    #     Envía el reporte usando el protocolo existente en batches.
-    #     """
-    #     try:
-    #         # Usar el método de batches del protocolo para enviar respuesta
-    #         success = protocol.send_response_batches("RPRT", "R", csv_content)
-    #         if success:
-    #             logger.info(f"Reporte enviado exitosamente en batches: {len(csv_content)} bytes")
-    #         else:
-    #             logger.error("Error enviando reporte en batches")
-            
-    #     except Exception as e:
-    #         logger.error(f"Error enviando reporte via protocolo: {e}")
 
     def _send_error_to_client(self, protocol, error_message):
         """

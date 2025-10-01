@@ -25,7 +25,7 @@ docker-compose-up: docker-image
 docker-compose-down:
 	docker compose -f docker-compose.yaml stop -t 1
 	docker compose -f docker-compose.yaml down
-	docker system prune -a --volumes
+# 	docker system prune -a --volumes
 	sudo rm -rf report*
 .PHONY: docker-compose-down
 
