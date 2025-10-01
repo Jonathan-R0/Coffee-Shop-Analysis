@@ -214,7 +214,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 routing_key=self.queue_name,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=1  
+                    delivery_mode=2
                 )
             )
         except Exception as e:

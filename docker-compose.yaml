@@ -56,6 +56,7 @@ services:
       - OUTPUT_QUEUE=raw_data
       - REPORTS_EXCHANGE=reports_exchange
       - JOIN_EXCHANGE=join.exchange
+      - OUTPUT_EXCHANGE=raw_data_exchange
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -74,10 +75,12 @@ services:
       - FILTER_MODE=year
       - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=1
+      - TOTAL_YEAR_FILTERS=2
       - FILTER_YEARS=2024,2025
       - OUTPUT_Q4=year_filtered_q4
       - OUTPUT_Q2=year_data.exchange
+      - INPUT_EXCHANGE=raw_data_exchange
+      - FILE_MODE=transactions
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -96,10 +99,12 @@ services:
       - FILTER_MODE=year
       - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=3
+      - TOTAL_YEAR_FILTERS=2
       - FILTER_YEARS=2024,2025
       - OUTPUT_Q4=year_filtered_q4
       - OUTPUT_Q2=year_data.exchange
+      - INPUT_EXCHANGE=raw_data_exchange
+      - FILE_MODE=transactions
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -118,10 +123,36 @@ services:
       - FILTER_MODE=year
       - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=3
+      - TOTAL_YEAR_FILTERS=2
       - FILTER_YEARS=2024,2025
       - OUTPUT_Q4=year_filtered_q4
       - OUTPUT_Q2=year_data.exchange
+      - FILE_MODE=transaction_items
+      - INPUT_EXCHANGE=raw_data_exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  filter_year_4:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=2
+      - FILTER_YEARS=2024,2025
+      - OUTPUT_Q4=year_filtered_q4
+      - OUTPUT_Q2=year_data.exchange
+      - INPUT_EXCHANGE=raw_data_exchange
+      - FILE_MODE=transaction_items
     volumes:
       - ./server/config.ini:/app/config.ini
 

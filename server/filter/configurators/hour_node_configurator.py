@@ -8,6 +8,15 @@ logger = logging.getLogger(__name__)
 
 
 class HourNodeConfigurator(NodeConfigurator):
+    
+    def create_input_middleware(self, input_queue: str, node_id: str):
+        logger.info(f"AmountNode: Usando working queue compartida '{input_queue}'")
+        
+        return MessageMiddlewareQueue(
+            host=self.rabbitmq_host,
+            queue_name=input_queue
+        )
+        
     def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str],
                                   output_q4: Optional[str] = None, output_q2: Optional[str] = None) -> Dict[str, Any]:
         middlewares = {}
@@ -88,3 +97,41 @@ class HourNodeConfigurator(NodeConfigurator):
             date_str = fields[8]
             return int(date_str[5:7])
         return None
+    
+    
+    
+    def handle_eof(self, counter: int, total_filters: int, eof_type: str, 
+                   middlewares: Dict[str, Any], input_middleware: Any) -> bool:
+        logger.info(f"HourNode: Procesando EOF counter={counter}, total_filters={total_filters}")
+        
+        if counter < total_filters:
+            self._forward_eof_to_input(counter + 1, eof_type, input_middleware)
+            return False
+        
+        elif counter == total_filters:
+            logger.info(f"HourNode: EOF llegó al último filtro - enviando downstream y cerrando")
+            self.send_eof(middlewares, "transactions")
+            return True
+        
+        return False
+    
+    def _forward_eof_to_input(self, new_counter: int, eof_type: str, input_middleware: Any):
+
+        eof_message = f"D:EOF:{new_counter}"
+
+        eof_dto = TransactionBatchDTO(eof_message, batch_type=BatchType.EOF)
+        
+        input_middleware.send(eof_dto.to_bytes_fast())
+        input_middleware.close()
+        
+        logger.info(f"HourNode: {eof_message} reenviado")
+        
+    def process_message(self, body: bytes, routing_key: str = None) -> tuple:
+        decoded_data = body.decode('utf-8').strip()
+        
+        if decoded_data.startswith("EOF:"):
+            dto = TransactionBatchDTO.from_bytes_fast(body)
+            return (None, 'transactions', dto, True)
+        
+        dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
+        return (False, 'transactions', dto, False)

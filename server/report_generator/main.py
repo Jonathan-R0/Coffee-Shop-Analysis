@@ -19,10 +19,11 @@ class ReportGenerator:
 
             route_keys=['q1.data', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof','q2_most_profit.data','q2_best_selling.data']
         )
-        #Agregar o quitar queries según necesidad de Queries
         self.expected_queries = {'q1'
-                                 ,'q3'
-                                 ,'q4'
+                                 #,'q3'
+                                 #,'q4'
+                                 ,'q2_most_profit'
+                                 ,'q2_best_selling'
                                  }
         self.total_expected = len(self.expected_queries)
         
@@ -38,15 +39,15 @@ class ReportGenerator:
             dto = TransactionBatchDTO.from_bytes_fast(message)
             
             query_name = routing_key.split('.')[0]                       
-            if routing_key.endswith('.eof'):
+            
+            if dto.batch_type == BatchType.EOF:
                 logger.info(f"EOF recibido para {query_name}")
                 self._close_csv_file(query_name)
                 self.eof_received.add(query_name)
                 
-                # CORREGIR: Verificar que tengamos EXACTAMENTE Q1, Q3, Q4
                 logger.info(f"EOF recibidos: {self.eof_received}")
-                
-                # PROBLEMA: Esto se ejecuta cuando llegan Q1 y Q3, pero Q4 aún no terminó
+                logger.info(f"Total expected recibidos: {self.total_expected}")
+
                 if len(self.eof_received) >= self.total_expected:
                     if self.eof_received == self.expected_queries:
                         logger.info("Todos los reportes completados: {}".format(self.eof_received))

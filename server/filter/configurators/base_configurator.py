@@ -25,3 +25,17 @@ class NodeConfigurator(ABC):
     @abstractmethod
     def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions"):
         pass
+    
+    @abstractmethod
+    def handle_eof(self, counter: int, total_filters: int, eof_type: str, 
+                   middlewares: Dict[str, Any], input_middleware: Any) -> bool:
+        pass
+    
+    @abstractmethod
+    def create_input_middleware(self, input_exchange: str, input_queue: str):
+        pass
+    
+    @abstractmethod
+    def process_message(self, body: bytes, routing_key: str = None) -> tuple:
+        pass
+

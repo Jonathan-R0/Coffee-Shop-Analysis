@@ -37,12 +37,12 @@ class Client:
     
     def process_and_send_files_from_volumes(self):
         mounted_folders = {
-            "D": "/data/transactions",
-            #"D": "/data/transactions_test",
-            "I": "/data/transaction_items",
+            #"D": "/data/transactions",
+            "D": "/data/transactions_test",
+            "I": "/data/transactions_items_test",
+            #"I": "/data/transaction_items",
             "U": "/data/users",
             "S": "/data/stores",
-            #"I": "/data/transactions_items_test",
             "M": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
             #"vouchers": "/data/vouchers"
