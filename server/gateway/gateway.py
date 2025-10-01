@@ -24,7 +24,9 @@ class Gateway:
         self.reports_config = [
             ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
             ('q3', self._convert_q3_to_csv, "Q3", "registros"),
-            ('q4', self._convert_q4_to_csv, "Q4", "cumpleanos")
+            ('q4', self._convert_q4_to_csv, "Q4", "cumpleanos"),
+            ('q2_most_profit', self._convert_q2_most_profit_to_csv, "Q2_MOST_PROFIT", "items"),
+            ('q2_best_selling', self._convert_q2_best_selling_to_csv, "Q2_BEST_SELLING", "items")
         ]
         self._middleware = MessageMiddlewareExchange(
             host=rabbitmq_host,
@@ -199,7 +201,9 @@ class Gateway:
         report_data = {
             'q1': [],
             'q3': [],
-            'q4': []
+            'q4': [],
+            'q2_most_profit': [],
+            'q2_best_selling': []
         }
         eof_count = 0
         
@@ -234,7 +238,6 @@ class Gateway:
         return report_data
 
     def _process_report_batch(self, data, query_name, report_data):
-        """Procesa un batch de datos para una query específica."""
         lines = data.strip().split('\n')
         
         for line in lines:
@@ -258,6 +261,18 @@ class Gateway:
                 report_data['q4'].append({
                     "store_name": values[0],
                     "birthdate": values[1],
+                })
+            elif query_name == "q2_most_profit" and len(values) >= 2:
+                report_data['q2_most_profit'].append({
+                    "store_name": values[0],
+                    "birthdate": values[1],
+                    "profit_sum": values[2]
+                })
+            elif query_name == "q2_best_selling" and len(values) >= 2:
+                report_data['q2_best_selling'].append({
+                    "year_month_created_at": values[0],
+                    "product_name": values[1],
+                    "sellings_qty": values[2]
                 })
 
     def _send_reports_to_client(self, protocol, report_data):
@@ -304,6 +319,25 @@ class Gateway:
         except Exception as e:
             logger.error(f"Error convirtiendo Q4 a CSV: {e}")
             return "ERROR,0,0"
+    def _convert_q2_most_profit_to_csv(self, records):
+        try:
+            csv_lines = []
+            for record in records:
+                csv_lines.append(f"{record['year_month_created_at']},{record['product_name']},{record['profit_sum']}")
+            return '\n'.join(csv_lines)
+        except Exception as e:
+            logger.error(f"Error convirtiendo Q2 Most Profit a CSV: {e}")
+            return "ERROR,ERROR,0"
+
+    def _convert_q2_best_selling_to_csv(self, records):
+        try:
+            csv_lines = []
+            for record in records:
+                csv_lines.append(f"{record['year_month_created_at']},{record['product_name']},{record['sellings_qty']}")
+            return '\n'.join(csv_lines)
+        except Exception as e:
+            logger.error(f"Error convirtiendo Q2 Best Selling a CSV: {e}")
+            return "ERROR,ERROR,0"
 
     def _send_report_via_protocol(self, protocol, csv_content, report_name="RPRT"):
         """Envía un reporte usando el protocolo existente."""
