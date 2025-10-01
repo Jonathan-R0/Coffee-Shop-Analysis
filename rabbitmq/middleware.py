@@ -71,6 +71,7 @@ class MessageMiddlewareExchange(MessageMiddleware):
             self.connection = pika.BlockingConnection(parameters)
             self.channel = self.connection.channel()
             self.channel.exchange_declare(exchange=self.exchange_name, exchange_type='topic', durable=True)
+            self.channel.confirm_delivery()
             logger.info(f"Conectado a RabbitMQ. Exchange declarado: {self.exchange_name}")
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Error conectando a RabbitMQ: {e}")

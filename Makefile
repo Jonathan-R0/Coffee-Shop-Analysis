@@ -31,6 +31,7 @@ docker-compose-down:
 	docker builder prune -f
 	docker volume prune -f
 	sudo rm -rf reports/*
+
 .PHONY: docker-compose-down
 
 docker-compose-logs:

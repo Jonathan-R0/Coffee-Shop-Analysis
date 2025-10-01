@@ -3,7 +3,9 @@ import os
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 from dtos.dto import TransactionBatchDTO, BatchType
 from topknode import TopKNode
+import time
 from best_selling_aggregator import BestSellingAggregatorNode
+
 
 
 logging.basicConfig(level=logging.INFO)
@@ -112,22 +114,28 @@ class TopKNodeRunner:
                     
                     results_csv = self.topk_node.generate_results_csv()
                     
+                    # Enviar datos
+                    logger.info(f"Enviando datos TopK finales")
                     result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
                     self.output_middleware.send(
                         result_dto.to_bytes_fast(),
                         routing_key=self.topk_node.get_output_routing_key()
                     )
+                    # time.sleep(0.1)
                     
+                    # Enviar EOF
+                    logger.info(f"EOF enviado a TopK final")
                     eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
                     self.output_middleware.send(
                         eof_dto.to_bytes_fast(),
                         routing_key=self.topk_node.get_eof_routing_key()
                     )
                     
+                    # time.sleep(0.2)
                     logger.info("Resultados TopK enviados")
                     return True
-                
-                return False
+                else:
+                    return False
             else:
                 eof_data = dto.data.strip()
                 counter = int(eof_data.split(':')[1]) if ':' in eof_data else 1

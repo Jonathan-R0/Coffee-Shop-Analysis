@@ -11,7 +11,8 @@ class YearNodeConfigurator(NodeConfigurator):
     def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str],
                                   output_q4: Optional[str] = None, output_q2: Optional[str] = None) -> Dict[str, Any]:
         middlewares = {}
-        
+        logger.info(f"Configurando middlewares de salida para YearNodeConfigurator {output_q1}, {output_q3}, {output_q4}")
+
         if output_q1:
             middlewares['q1'] = MessageMiddlewareQueue(
                 host=self.rabbitmq_host,

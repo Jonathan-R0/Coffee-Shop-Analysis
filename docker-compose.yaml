@@ -38,8 +38,8 @@ services:
       - ./data/transactions:/data/transactions
 
       - ./data/transactions_test:/data/transactions_test
+      - ./report:/app/report
       - ./data/transactions_items_test:/data/transactions_items_test
-      - ./reports:/reports
 
   gateway:
     build:
@@ -74,7 +74,7 @@ services:
       - FILTER_MODE=year
       - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=3
+      - TOTAL_YEAR_FILTERS=1
       - FILTER_YEARS=2024,2025
       - OUTPUT_Q4=year_filtered_q4
       - OUTPUT_Q2=year_data.exchange
@@ -140,53 +140,53 @@ services:
       - FILTER_MODE=hour
       - INPUT_QUEUE=year_filtered
       - OUTPUT_Q1=hour_filtered
-      - TOTAL_HOUR_FILTERS=3
+      - TOTAL_HOUR_FILTERS=1
       - FILTER_HOURS=06:00-22:59
       - OUTPUT_Q3=groupby.join.exchange
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  filter_hour_2:
-    build:
-      context: .
-      dockerfile: ./server/filter/Dockerfile
-    container_name: filter_hour_2
-    restart: on-failure
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - FILTER_MODE=hour
-      - INPUT_QUEUE=year_filtered
-      - OUTPUT_Q1=hour_filtered
-      - TOTAL_HOUR_FILTERS=3
-      - FILTER_HOURS=06:00-22:59
-      - OUTPUT_Q3=groupby.join.exchange
-    volumes:
-      - ./server/config.ini:/app/config.ini
+  # filter_hour_2:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/filter/Dockerfile
+  #   container_name: filter_hour_2
+  #   restart: on-failure
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - FILTER_MODE=hour
+  #     - INPUT_QUEUE=year_filtered
+  #     - OUTPUT_Q1=hour_filtered
+  #     - TOTAL_HOUR_FILTERS=3
+  #     - FILTER_HOURS=06:00-22:59
+  #     - OUTPUT_Q3=groupby.join.exchange
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
 
-  filter_hour_3:
-    build:
-      context: .
-      dockerfile: ./server/filter/Dockerfile
-    container_name: filter_hour_3
-    restart: on-failure
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - FILTER_MODE=hour
-      - INPUT_QUEUE=year_filtered
-      - OUTPUT_Q1=hour_filtered
-      - TOTAL_HOUR_FILTERS=3
-      - FILTER_HOURS=06:00-22:59
-      - OUTPUT_Q3=groupby.join.exchange
-    volumes:
-      - ./server/config.ini:/app/config.ini
+  # filter_hour_3:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/filter/Dockerfile
+  #   container_name: filter_hour_3
+  #   restart: on-failure
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - FILTER_MODE=hour
+  #     - INPUT_QUEUE=year_filtered
+  #     - OUTPUT_Q1=hour_filtered
+  #     - TOTAL_HOUR_FILTERS=3
+  #     - FILTER_HOURS=06:00-22:59
+  #     - OUTPUT_Q3=groupby.join.exchange
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
 
   # groupby_semester_1:
   #   build:

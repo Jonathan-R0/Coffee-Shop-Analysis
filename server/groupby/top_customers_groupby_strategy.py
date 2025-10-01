@@ -81,14 +81,14 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
                 eof_dto = TransactionBatchDTO(f"EOF:{new_counter}", BatchType.EOF)
                 middlewares["input_queue"].send(eof_dto.to_bytes_fast())
                 logger.info(f"EOF:{new_counter} reenviado a input queue")
-                return False
             else:
                 eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
                 middlewares["output"].send(eof_dto.to_bytes_fast(), 'aggregated.eof')
                 logger.info("EOF enviado a TopK intermedios (último nodo)")
                 
                 logger.info("EOF enviado a todas las stores - cerrando")
-                return True
+            
+            return True
             
         except Exception as e:
             logger.error(f"Error manejando EOF: {e}")

@@ -16,8 +16,15 @@ class ReportGenerator:
         self.input_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.report_exchange,
+
             route_keys=['q1.data', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof','q2_most_profit.data','q2_best_selling.data']
         )
+        #Agregar o quitar queries según necesidad de Queries
+        self.expected_queries = {'q1'
+                                 ,'q3'
+                                 ,'q4'
+                                 }
+        self.total_expected = len(self.expected_queries)
         
         self.csv_files = {}  
         self.eof_received = set() 
@@ -30,20 +37,39 @@ class ReportGenerator:
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
             
-            query_name = routing_key.split('.')[0]  # 'q1' o 'q3'
-            
-            if dto.batch_type == BatchType.EOF:
+            query_name = routing_key.split('.')[0]                       
+            if routing_key.endswith('.eof'):
                 logger.info(f"EOF recibido para {query_name}")
                 self._close_csv_file(query_name)
                 self.eof_received.add(query_name)
                 
-                if len(self.eof_received) >= 5:
-                    logger.info("Todos los reportes completados (Q1, Q3, Q4)")
-                    self._publish_reports()
-                    return True
-                                
-
+                # CORREGIR: Verificar que tengamos EXACTAMENTE Q1, Q3, Q4
+                logger.info(f"EOF recibidos: {self.eof_received}")
+                
+                # PROBLEMA: Esto se ejecuta cuando llegan Q1 y Q3, pero Q4 aún no terminó
+                if len(self.eof_received) >= self.total_expected:
+                    if self.eof_received == self.expected_queries:
+                        logger.info("Todos los reportes completados: {}".format(self.eof_received))
+                        self._publish_reports()
+                        return True
+                    else:
+                        logger.warning(f"EOF count = 3 pero queries incorrectas: {self.eof_received}")
                 return False
+            
+            # if routing_key.endswith('.data'):
+            #     if message == b"EOF:1":
+            #         logger.info(f"EOF recibido para {query_name}")
+            #         self._close_csv_file(query_name)
+            #         self.eof_received.add(query_name)
+                
+            #         if len(self.eof_received) >= 3:
+            #             expected_queries = {'q1', 'q3', 'q4'}
+            #             if self.eof_received == expected_queries:
+            #                 logger.info("Todos los reportes completados (Q1, Q3, Q4)")
+            #                 self._publish_reports()
+            #                 return False
+            #             else:
+            #                 logger.warning(f"EOF count = 3 pero queries incorrectas: {self.eof_received}")
             
             if dto.batch_type == BatchType.RAW_CSV:
                 self._write_to_csv(dto.data, query_name)
@@ -58,7 +84,7 @@ class ReportGenerator:
         try:
             routing_key = method.routing_key  
             should_stop = self.process_message(body, routing_key)  
-            
+
             if should_stop:
                 logger.info("Todos los reportes generados - deteniendo consuming")
                 ch.stop_consuming()
@@ -156,10 +182,13 @@ class ReportGenerator:
             )
             
             batch_size = 150
-            for query_name in ['q1', 'q3', 'q4']: 
+
+            for query_name in self.expected_queries:  # Las 3 queries activas
+
                 reports_dir = './reports'
                 files = [f for f in os.listdir(reports_dir) if f.startswith(query_name) and f.endswith('.csv')]
 
+                logger.info(f"Publicando reportes para {query_name}, archivos encontrados: {files}")
                 for file in files:
                     file_path = os.path.join(reports_dir, file)
                     with open(file_path, 'r', encoding='utf-8') as f:
