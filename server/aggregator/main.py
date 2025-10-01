@@ -3,6 +3,8 @@ import os
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 from dtos.dto import TransactionBatchDTO, BatchType
 from topknode import TopKNode
+from best_selling_aggregator import BestSellingAggregatorNode
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,7 +24,6 @@ class TopKNodeRunner:
         )
         
         self._setup_input_middleware()
-        
         self._setup_output_middleware()
         
         logger.info(f"TopKNodeRunner inicializado:")
@@ -88,7 +89,6 @@ class TopKNodeRunner:
         logger.info(f"  Output Routing Keys: {output_routing_keys}")
     
     def _process_csv_batch(self, csv_data: str):
-        """Procesa un batch de datos CSV."""
         processed_count = 0
         
         for line in csv_data.split('\n'):
@@ -168,7 +168,6 @@ class TopKNodeRunner:
             return False
     
     def process_message(self, message: bytes, routing_key: str = None) -> bool:
-        """Procesa un mensaje recibido."""
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
             
@@ -185,7 +184,6 @@ class TopKNodeRunner:
             return False
     
     def on_message_callback(self, ch, method, properties, body):
-        """Callback para RabbitMQ."""
         try:
             routing_key = getattr(method, 'routing_key', None)
             should_stop = self.process_message(body, routing_key)
@@ -196,7 +194,6 @@ class TopKNodeRunner:
             logger.error(f"Error en callback: {e}")
     
     def start(self):
-        """Inicia el nodo TopK."""
         try:
             mode_str = "Final" if self.is_final else "Intermedio"
             logger.info(f"Iniciando TopKNode {mode_str} (ID: {self.node_id})...")
@@ -210,7 +207,6 @@ class TopKNodeRunner:
             self._cleanup()
     
     def _cleanup(self):
-        """Limpia recursos."""
         try:
             if self.input_middleware:
                 self.input_middleware.close()
@@ -225,5 +221,13 @@ class TopKNodeRunner:
 
 
 if __name__ == "__main__":
-    runner = TopKNodeRunner()
-    runner.start()
+    aggregator_type = os.getenv('AGGREGATOR_TYPE', 'topk')  
+    
+
+    if aggregator_type in ['best_selling_intermediate', 'best_selling_final']:
+
+        aggregator = BestSellingAggregatorNode()
+    else:
+        aggregator = TopKNodeRunner()
+    
+    aggregator.start()

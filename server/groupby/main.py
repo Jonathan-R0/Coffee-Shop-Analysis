@@ -1,7 +1,7 @@
 import logging
 import os
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
-from dtos.dto import TransactionBatchDTO, BatchType
+from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType
 from groupby_strategy import GroupByStrategyFactory
 
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +23,7 @@ class GroupByNode:
             self.output_exchange
         )
         
-        if self.groupby_mode == 'top_customers':
+        if self.groupby_mode in ['top_customers', 'best_selling']:
             self.output_middlewares['input_queue'] = self.input_middleware
         
         logger.info(f"GroupByNode inicializado en modo {self.groupby_mode}")
@@ -49,6 +49,19 @@ class GroupByNode:
                 queue_name=self.input_queue
             )
             logger.info(f"  Input: Queue {self.input_queue} (round-robin)")
+        
+        elif self.groupby_mode == 'best_selling':
+            year_routing_key = os.getenv('AGGREGATOR_YEAR', '2024')
+            exchange_name = os.getenv('INPUT_EXCHANGE', 'year_filtered_q2')
+            queue_name = f"best_selling_{year_routing_key}_queue"
+            
+            self.input_middleware = MessageMiddlewareQueue(
+                host=self.rabbitmq_host,
+                queue_name=queue_name,
+                exchange_name=exchange_name,
+                routing_keys=[year_routing_key]
+            )
+            logger.info(f"  Input: Queue {queue_name} bindeada a exchange {exchange_name} con routing key {year_routing_key}")
     
     def _create_groupby_strategy(self):
         config = {}
@@ -62,12 +75,19 @@ class GroupByNode:
         elif self.groupby_mode == 'top_customers':
             config['input_queue_name'] = os.getenv('INPUT_QUEUE', 'year_filtered_q4')
         
+        elif self.groupby_mode == 'best_selling':
+            year_routing_key = os.getenv('AGGREGATOR_YEAR', '2024')
+            config['input_queue_name'] = f"best_selling_{year_routing_key}_queue"
+        
         return GroupByStrategyFactory.create_strategy(self.groupby_mode, **config)
     
     def process_message(self, message: bytes) -> bool:
         try:
-            dto = TransactionBatchDTO.from_bytes_fast(message)
-            
+            if self.groupby_mode == 'best_selling':
+                dto = TransactionItemBatchDTO.from_bytes_fast(message)
+            else:
+                dto = TransactionBatchDTO.from_bytes_fast(message)
+            logger.info(f"Mensaje recibido: batch_type={dto.batch_type}, tamaño={len(dto.data)} bytes")
             if dto.batch_type == BatchType.EOF:
                 return self.groupby_strategy.handle_eof_message(dto, self.output_middlewares)
             

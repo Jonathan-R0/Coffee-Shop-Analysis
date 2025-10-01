@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class AmountNodeConfigurator(NodeConfigurator):
     
     def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str],
-                                  output_q4: Optional[str] = None) -> Dict[str, Any]:
+                                  output_q4: Optional[str] = None, output_q2: Optional[str] = None) -> Dict[str, Any]:
         middlewares = {}
         
         if output_q1:
@@ -26,7 +26,7 @@ class AmountNodeConfigurator(NodeConfigurator):
     def process_filtered_data(self, filtered_csv: str) -> str:
         return self._extract_q1_columns(filtered_csv)
     
-    def send_data(self, data: str, middlewares: Dict[str, Any]):
+    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions"):
         if 'q1' in middlewares:
             filtered_dto = TransactionBatchDTO(data, batch_type=BatchType.RAW_CSV)
             middlewares['q1'].send(
@@ -34,7 +34,7 @@ class AmountNodeConfigurator(NodeConfigurator):
                 routing_key='q1.data'
             )
     
-    def send_eof(self, middlewares: Dict[str, Any]):
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions"):
         if 'q1' in middlewares:
             eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
             middlewares['q1'].send(

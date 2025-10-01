@@ -11,7 +11,7 @@ class NodeConfigurator(ABC):
     
     @abstractmethod
     def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str], 
-                                  output_q4: Optional[str] = None) -> Dict[str, Any]:
+                                  output_q4: Optional[str] = None, output_q2: Optional[str] = None) -> Dict[str, Any]:
         pass
     
     @abstractmethod
@@ -19,9 +19,9 @@ class NodeConfigurator(ABC):
         pass
     
     @abstractmethod
-    def send_data(self, data: str, middlewares: Dict[str, Any]):
+    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions"):
         pass
     
     @abstractmethod
-    def send_eof(self, middlewares: Dict[str, Any]):
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions"):
         pass

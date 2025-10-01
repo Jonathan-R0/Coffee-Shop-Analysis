@@ -60,7 +60,7 @@ class MessageMiddlewareExchange(MessageMiddleware):
         self.route_keys = route_keys if isinstance(route_keys, list) else [route_keys]
         self.connection = None
         self.channel = None
-        self.consumer_queue = None  # Cola temporal para el consumidor
+        self.consumer_queue = None  
         
         self._connect()
 
@@ -164,9 +164,12 @@ class MessageMiddlewareExchange(MessageMiddleware):
             raise MessageMiddlewareCloseError(f"Error cerrando conexión: {e}")
 
 class MessageMiddlewareQueue(MessageMiddleware):
-    def __init__(self, host: str, queue_name: str):
+    def __init__(self, host: str, queue_name: str, exchange_name: str = None, 
+                 routing_keys: list = None):
         self.host = host
         self.queue_name = queue_name
+        self.exchange_name = exchange_name
+        self.routing_keys = routing_keys or []
         self.connection = None
         self.channel = None
 
@@ -178,7 +181,24 @@ class MessageMiddlewareQueue(MessageMiddleware):
             parameters = pika.ConnectionParameters(host=self.host, credentials=credentials)
             self.connection = pika.BlockingConnection(parameters)
             self.channel = self.connection.channel()
-            self.channel.queue_declare(queue=self.queue_name, durable=True)  # Cola persistente
+            
+            self.channel.queue_declare(queue=self.queue_name, durable=True)
+            
+            if self.exchange_name and self.routing_keys:
+                self.channel.exchange_declare(
+                    exchange=self.exchange_name, 
+                    exchange_type='topic', 
+                    durable=True
+                )
+                
+                for routing_key in self.routing_keys:
+                    self.channel.queue_bind(
+                        queue=self.queue_name,
+                        exchange=self.exchange_name,
+                        routing_key=routing_key
+                    )
+                    logger.info(f"Queue '{self.queue_name}' bindeada a '{self.exchange_name}' con routing_key '{routing_key}'")
+            
             logger.info(f"Conectado a RabbitMQ. Cola declarada: {self.queue_name}")
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Error conectando a RabbitMQ: {e}")
@@ -193,10 +213,9 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 routing_key=self.queue_name,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=1  # No persistent = MUCHO más rápido
+                    delivery_mode=1  
                 )
             )
-            # Mensaje publicado (log activado para debug)
         except Exception as e:
             logger.error(f"Error enviando mensaje: {e}")
             raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")

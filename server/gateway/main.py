@@ -26,7 +26,7 @@ def initialize_config():
         config_params["rabbitmq_host"] = os.getenv('RABBITMQ_HOST', config["DEFAULT"]["RABBITMQ_HOST"])
         config_params["output_queue"] = os.getenv('OUTPUT_QUEUE', config["DEFAULT"]["OUTPUT_QUEUE"])
         config_params["reports_exchange"] = os.getenv('REPORTS_EXCHANGE', config.get("DEFAULT", "REPORTS_EXCHANGE", fallback=None))
-        config_params["store_queue"] = os.getenv('STORE_EXCHANGE', config["DEFAULT"]["STORE_EXCHANGE"])
+        config_params["join_exchange"] = os.getenv('JOIN_EXCHANGE', config["DEFAULT"]["JOIN_EXCHANGE"])
     except KeyError as e:
         raise KeyError("Key was not found. Error: {} .Aborting server".format(e))
     except ValueError as e:
@@ -49,9 +49,9 @@ def main():
     listener_backlog = config["listener_backlog"]
     rabbitmq_host = config["rabbitmq_host"]
     output_queue = config["output_queue"]
-    store_queue = config["store_queue"]
+    join_exchange = config["join_exchange"]
     reports_exchange = config["reports_exchange"]
-    gateway = Gateway(port, listener_backlog, rabbitmq_host, output_queue, store_queue,reports_exchange)
+    gateway = Gateway(port, listener_backlog, rabbitmq_host, output_queue, join_exchange, reports_exchange)
     gateway.start()
 
 if __name__ == "__main__":

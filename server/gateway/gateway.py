@@ -8,7 +8,7 @@ from common.protocol import Protocol, ProtocolMessage
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dataclasses import asdict
 from logger import get_logger
-from dtos.dto import TransactionBatchDTO, BatchType, StoreBatchDTO,UserBatchDTO, ReportBatchDTO
+from dtos.dto import TransactionBatchDTO, BatchType, StoreBatchDTO,UserBatchDTO, ReportBatchDTO, TransactionItemBatchDTO, MenuItemBatchDTO
 
 logger = get_logger(__name__)
 
@@ -24,7 +24,7 @@ class Gateway:
         self._join_middleware = MessageMiddlewareExchange(
             host=rabbitmq_host,
             exchange_name=store_exchange,
-            route_keys=['stores.data', 'stores.eof','users.data','users.eof']
+            route_keys=['stores.data', 'stores.eof','users.data','users.eof', 'menu_items.data']
         )
         
         self.report_middleware = MessageMiddlewareExchange(
@@ -58,6 +58,10 @@ class Gateway:
                         self.process_type_s_message(message)
                     elif message.file_type == "U":
                         self.process_type_u_message(message)
+                    elif message.file_type == "I":
+                        self.process_type_i_message(message)
+                    elif message.file_type == "M":
+                        self.process_type_m_message(message)
                     else:
                         self._middleware.send(asdict(message))
                 else:
@@ -73,45 +77,60 @@ class Gateway:
         """Maneja el mensaje FINISH enviando EOF al pipeline correspondiente."""
         try:
             if file_type == "D":
-                # EOF para transactions
-                eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
+                eof_dto = TransactionBatchDTO("D:EOF:1", batch_type=BatchType.EOF)
                 self._middleware.send(eof_dto.to_bytes_fast())
-                logger.info("EOF:1 enviado para tipo D (transactions)")
+                logger.info("D:EOF:1 enviado para tipo D (transactions)")
                 
             elif file_type == "S":
-                # EOF para stores
                 eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)
                 self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='stores.eof')
                 logger.info("EOF:1 enviado para tipo S (stores)")
 
             elif file_type == "U":
-                # EOF para users
                 eof_dto = UserBatchDTO("EOF:1", batch_type=BatchType.EOF)
                 self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='users.eof')
                 logger.info("EOF:1 enviado para tipo U (users)")
+                
+            elif file_type == "I":
+                eof_dto = TransactionItemBatchDTO("I:EOF:1", batch_type=BatchType.EOF)
+                self._middleware.send(eof_dto.to_bytes_fast())
+                logger.info("I:EOF:1 enviado para tipo I (items)")
+
+            elif file_type == "M":
+                eof_dto = MenuItemBatchDTO("EOF:1", batch_type=BatchType.EOF)
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='menu_items.data')
+                logger.info("M:EOF:1 enviado para tipo M (menu_items)")
 
         except Exception as e:
             logger.error(f"Error manejando FINISH: {e}")
             
     def process_type_d_message(self, message: ProtocolMessage):
-        """
-        Procesa un mensaje de tipo 'D', utilizando el DTO para manejar los datos en formato binario.
-        """
         try:
-            dto = TransactionBatchDTO.from_bytes_fast(message.data.encode('utf-8'))
+            data_with_type = f"D:{message.data}"
+            dto = TransactionBatchDTO(data_with_type, BatchType.RAW_CSV)
 
             serialized_data = dto.to_bytes_fast()
 
             self._middleware.send(serialized_data)
-            logger.info(f"Mensaje enviado a RabbitMQ: Tipo: {dto.batch_type}")
+            logger.info(f"Mensaje enviado a RabbitMQ: Tipo: {dto.batch_type}, FileType: D")
 
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'D': {e}")
             
+    def process_type_i_message(self, message: ProtocolMessage):
+        try:
+            data_with_type = f"I:{message.data}"
+            dto = TransactionItemBatchDTO(data_with_type, BatchType.RAW_CSV)
+
+            serialized_data = dto.to_bytes_fast()
+
+            self._middleware.send(serialized_data)
+            logger.info(f"Mensaje enviado a RabbitMQ: Tipo: {dto.batch_type}, FileType: I")
+
+        except Exception as e:
+            logger.error(f"Error procesando mensaje de tipo 'I': {e}")
+            
     def process_type_s_message(self, message: ProtocolMessage):
-        """
-        Procesa un mensaje de tipo 'U' (stores), utilizando UserBatchDTO.
-        """
         try:
             bytes_data = message.data.encode('utf-8')
             dto = StoreBatchDTO.from_bytes_fast(bytes_data)
@@ -128,9 +147,6 @@ class Gateway:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
             
     def process_type_u_message(self, message: ProtocolMessage):
-        """
-        Procesa un mensaje de tipo 'U' (stores), utilizando UserBatchDTO.
-        """
         try:
             bytes_data = message.data.encode('utf-8')
             dto = UserBatchDTO.from_bytes_fast(bytes_data)
@@ -145,6 +161,23 @@ class Gateway:
 
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
+            
+    def process_type_m_message(self, message: ProtocolMessage):
+        try:
+            bytes_data = message.data.encode('utf-8')
+            dto = MenuItemBatchDTO.from_bytes_fast(bytes_data)
+            serialized_data = dto.to_bytes_fast()
+
+
+            self._join_middleware.send(serialized_data, routing_key='menu_items.data')
+
+
+            line_count = len([line for line in dto.data.split('\n') if line.strip()])
+            logger.info(f"Menu Items enviados a menu_items.data queue: Líneas: {line_count}")
+
+        except Exception as e:
+            logger.error(f"Error procesando mensaje de tipo 'M': {e}")
+
 
     def _wait_and_send_report(self, protocol):
         """
@@ -153,7 +186,6 @@ class Gateway:
         try:
             logger.info("Esperando reportes del pipeline...")
             
-            # Acumuladores para cada reporte
             q1_transactions = []
             q3_transactions = []
             q4_transactions = []
@@ -163,25 +195,21 @@ class Gateway:
                 nonlocal eof_count
                 
                 try:
-                    # Usar ReportBatchDTO para decodificar
                     dto = ReportBatchDTO.from_bytes_fast(body)
                     routing_key = method.routing_key
                     query_name = routing_key.split('.')[0]  # 'q1', 'q3', o 'q4'
                     
                     logger.info(f"Recibido mensaje para {query_name}: {dto.batch_type}, routing: {routing_key}")
                     
-                    # Detectar EOF por routing key (.eof) en lugar de por batch_type
                     if routing_key.endswith('.eof'):
                         eof_count += 1
                         logger.info(f"EOF recibido para {query_name}. Total EOF: {eof_count}")
                         
-                        # Si recibimos los 3 EOF, terminar
                         if eof_count >= 3:
                             logger.info("Todos los reportes recibidos completamente")
                             ch.stop_consuming()
                         return
                     
-                    # Procesar datos RAW_CSV (ahora llegan como RAW_CSV en lugar de tipos específicos)
                     elif dto.batch_type == BatchType.RAW_CSV:
                         lines = dto.data.strip().split('\n')
                         
@@ -212,10 +240,8 @@ class Gateway:
                 except Exception as e:
                     logger.error(f"Error procesando batch del reporte: {e}")
             
-            # Consumir batches hasta recibir los 3 EOF
             self.report_middleware.start_consuming(report_callback)
             
-            # Enviar los 3 reportes al cliente
             if q1_transactions:
                 csv_q1 = self._convert_transactions_to_csv(q1_transactions)
                 self._send_report_via_protocol(protocol, csv_q1, "Q1")
@@ -275,7 +301,6 @@ class Gateway:
         Convierte lista de transacciones a formato CSV.
         """
         try:
-            # Crear CSV
             csv_lines = ["transaction_id,final_amount"]
             for transaction in transactions:
                 csv_lines.append(f"{transaction['transaction_id']},{transaction['final_amount']}")
@@ -290,7 +315,6 @@ class Gateway:
         Envía el reporte usando el protocolo existente en batches.
         """
         try:
-            # Usar el método de batches del protocolo para enviar respuesta
             success = protocol.send_response_batches("RPRT", "R", csv_content)
             if success:
                 logger.info(f"Reporte enviado exitosamente en batches: {len(csv_content)} bytes")
@@ -305,7 +329,6 @@ class Gateway:
         Envía un mensaje de error al cliente.
         """
         try:
-            # Usar el método público del protocolo para enviar error
             protocol.send_response_message("ERRO", "E", error_message)
         except Exception as e:
             logger.error(f"Error enviando mensaje de error: {e}")
@@ -323,14 +346,7 @@ class Gateway:
             self.shutdown(None, None)
             
     def __accept_new_connection(self):
-        """
-        Accept new connections
 
-        Function blocks until a connection to a client is made.
-        Then connection created is printed and returned
-        """
-
-        # Connection arrived
         logger.info('Accepting new connection')
         c, addr = self._server_socket.accept()
         logger.info(f'Accepted new connection from {addr[0]}')
