@@ -25,8 +25,8 @@ class ReportGenerator:
                 route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof','q2_most_profit.data','q2_best_selling.data']
         )
         self.expected_queries = {'q1'
-                                 #,'q3'
-                                 #,'q4'
+                                 ,'q3'
+                                #  ,'q4'
                                  ,'q2_most_profit'
                                  ,'q2_best_selling'
                                  }
@@ -59,7 +59,7 @@ class ReportGenerator:
                         self._publish_reports()
                         return True
                     else:
-                        logger.warning(f"EOF count = 3 pero queries incorrectas: {self.eof_received}")
+                        logger.warning(f"EOF co   if dto.batch_type == BatchType.EOF:unt = 3 pero queries incorrectas: {self.eof_received}")
                 return False
             
             # if routing_key.endswith('.data'):

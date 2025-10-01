@@ -20,11 +20,11 @@ class Gateway:
         self._server_socket.bind(('', port))
         self._server_socket.listen(listener_backlog)
         self._is_running = False
-        self.max_expected_reports = 3
+        self.max_expected_reports = 4
         self.reports_config = [
             ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
             ('q3', self._convert_q3_to_csv, "Q3", "registros"),
-            ('q4', self._convert_q4_to_csv, "Q4", "cumpleanos"),
+            # ('q4', self._convert_q4_to_csv, "Q4", "cumpleanos"),
             ('q2_most_profit', self._convert_q2_most_profit_to_csv, "Q2_MOST_PROFIT", "items"),
             ('q2_best_selling', self._convert_q2_best_selling_to_csv, "Q2_BEST_SELLING", "items")
         ]
@@ -262,13 +262,13 @@ class Gateway:
                     "store_name": values[0],
                     "birthdate": values[1],
                 })
-            elif query_name == "q2_most_profit" and len(values) >= 2:
+            elif query_name == "q2_most_profit" and len(values) >= 3:
                 report_data['q2_most_profit'].append({
-                    "store_name": values[0],
-                    "birthdate": values[1],
+                    "year_month_created_at": values[0],
+                    "product_name": values[1],
                     "profit_sum": values[2]
                 })
-            elif query_name == "q2_best_selling" and len(values) >= 2:
+            elif query_name == "q2_best_selling" and len(values) >= 3:
                 report_data['q2_best_selling'].append({
                     "year_month_created_at": values[0],
                     "product_name": values[1],
@@ -332,7 +332,9 @@ class Gateway:
     def _convert_q2_best_selling_to_csv(self, records):
         try:
             csv_lines = []
+            logger.info(f"Convirtiendo {len(records)} registros de Q2 Best Selling a CSV")
             for record in records:
+                logger.info(f"Procesando registro: {record}")
                 csv_lines.append(f"{record['year_month_created_at']},{record['product_name']},{record['sellings_qty']}")
             return '\n'.join(csv_lines)
         except Exception as e:

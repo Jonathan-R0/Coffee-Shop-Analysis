@@ -16,8 +16,8 @@ class Client:
         self.protocol = None  
         self.processor = None
         #Modificar cuando quiera mas querys
-        self.expected_reports = 3
-    
+        self.expected_reports = 4
+
     def run(self):
         self.keep_running = True
         try:

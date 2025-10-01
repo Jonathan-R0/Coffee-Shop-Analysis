@@ -30,7 +30,7 @@ docker-compose-down:
 	docker network prune -f
 	docker builder prune -f
 	docker volume prune -f
-	sudo rm -rf reports/*
+	sudo rm -rf report*
 
 .PHONY: docker-compose-down
 

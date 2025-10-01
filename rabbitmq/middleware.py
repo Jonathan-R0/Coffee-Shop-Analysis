@@ -89,7 +89,7 @@ class MessageMiddlewareExchange(MessageMiddleware):
                 routing_key=key,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=2
+                    delivery_mode=1
                 )
             )
         except Exception as e:
