@@ -12,12 +12,12 @@ class AmountNodeConfigurator(NodeConfigurator):
     def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str],
                                   output_q4: Optional[str] = None) -> Dict[str, Any]:
         middlewares = {}
-        
+        logger.info(f"Configurando middlewares de salida para AmountNodeConfigurator {output_q1}")
         if output_q1:
             middlewares['q1'] = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
                 exchange_name=output_q1,
-                route_keys=[]
+                route_keys=['q1.data']
             )
             logger.info(f"  Output Q1 Exchange: {output_q1}")
         
@@ -33,10 +33,11 @@ class AmountNodeConfigurator(NodeConfigurator):
                 filtered_dto.to_bytes_fast(),
                 routing_key='q1.data'
             )
+            logger.info(f"Datos enviados a Q1 exchange con routing key 'q1.data'")
     
     def send_eof(self, middlewares: Dict[str, Any]):
         if 'q1' in middlewares:
-            eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
+            eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
             middlewares['q1'].send(
                 eof_dto.to_bytes_fast(),
                 routing_key='q1.data'

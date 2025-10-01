@@ -4,7 +4,8 @@ import os
 import json
 import signal
 import sys
-from common.protocol import Protocol, ProtocolMessage
+from common.protocol import Protocol, ProtocolMessage 
+from common.new_protocolo import ProtocolNew
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dataclasses import asdict
 from logger import get_logger
@@ -36,22 +37,22 @@ class Gateway:
     def handle_connection(self, client_sock):
         """Maneja una conexión entrante."""
         logger.info(f"Conexión aceptada desde {client_sock.getpeername()}")
-        protocol = Protocol(client_sock)
+        protocol = ProtocolNew(client_sock)
 
         try:
             for message in protocol.receive_messages():
                 logger.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
 
                 if message.action == "EXIT":
+                    logger.info(f"EXIT received")
                     self._wait_and_send_report(protocol)
-
                     break
                 
-                elif message.action == "FINI": 
+                elif message.action == "FINISH": 
                     logger.info(f"FINISH received for file_type: {message.file_type}")
                     self._handle_finish(message.file_type)
                 
-                if message.action == "SEND":
+                elif message.action == "BATCH":
                     if message.file_type == "D":
                         self.process_type_d_message(message)
                     elif message.file_type == "S":
@@ -98,6 +99,7 @@ class Gateway:
         Procesa un mensaje de tipo 'D', utilizando el DTO para manejar los datos en formato binario.
         """
         try:
+            # logger.info(f"Mensaje tipo D recibido, {message.data}")
             dto = TransactionBatchDTO.from_bytes_fast(message.data.encode('utf-8'))
 
             serialized_data = dto.to_bytes_fast()
@@ -147,89 +149,15 @@ class Gateway:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
 
     def _wait_and_send_report(self, protocol):
-        """
-        Espera por TODOS los reportes (Q1, Q3, Q4) del report generator y los envía al cliente.
-        """
+        """Espera por TODOS los reportes (Q1, Q3, Q4) del report generator y los envía al cliente."""
         try:
             logger.info("Esperando reportes del pipeline...")
             
-            # Acumuladores para cada reporte
-            q1_transactions = []
-            q3_transactions = []
-            q4_transactions = []
-            eof_count = 0
+            # Recopilar datos de reportes
+            report_data = self._collect_reports_from_pipeline()
             
-            def report_callback(ch, method, properties, body):
-                nonlocal eof_count
-                
-                try:
-                    # Usar ReportBatchDTO para decodificar
-                    dto = ReportBatchDTO.from_bytes_fast(body)
-                    routing_key = method.routing_key
-                    query_name = routing_key.split('.')[0]  # 'q1', 'q3', o 'q4'
-                    
-                    logger.info(f"Recibido mensaje para {query_name}: {dto.batch_type}, routing: {routing_key}")
-                    
-                    # Detectar EOF por routing key (.eof) en lugar de por batch_type
-                    if routing_key.endswith('.eof'):
-                        eof_count += 1
-                        logger.info(f"EOF recibido para {query_name}. Total EOF: {eof_count}")
-                        
-                        # Si recibimos los 3 EOF, terminar
-                        if eof_count >= 3:
-                            logger.info("Todos los reportes recibidos completamente")
-                            ch.stop_consuming()
-                        return
-                    
-                    # Procesar datos RAW_CSV (ahora llegan como RAW_CSV en lugar de tipos específicos)
-                    elif dto.batch_type == BatchType.RAW_CSV:
-                        lines = dto.data.strip().split('\n')
-                        
-                        for line in lines:
-                            if line.strip():
-                                values = line.split(',')
-                                
-                                if query_name == "q1" and len(values) >= 2:
-                                    q1_transactions.append({
-                                        "transaction_id": values[0],
-                                        "final_amount": values[1]
-                                    })
-                                elif query_name == "q3" and len(values) >= 3:
-                                    q3_transactions.append({
-                                        "year_half": values[0],
-                                        "store_name": values[1],
-                                        "tpv": values[2]
-                                    })
-                                elif query_name == "q4" and len(values) >= 3:
-                                    q4_transactions.append({
-                                        "user_id": values[0],
-                                        "total_spent": values[1],
-                                        "total_transactions": values[2]
-                                    })
-                        
-                        logger.info(f"Batch procesado: Q1={len(q1_transactions)}, Q3={len(q3_transactions)}, Q4={len(q4_transactions)}")
-                    
-                except Exception as e:
-                    logger.error(f"Error procesando batch del reporte: {e}")
-            
-            # Consumir batches hasta recibir los 3 EOF
-            self.report_middleware.start_consuming(report_callback)
-            
-            # Enviar los 3 reportes al cliente
-            if q1_transactions:
-                csv_q1 = self._convert_transactions_to_csv(q1_transactions)
-                self._send_report_via_protocol(protocol, csv_q1, "Q1")
-                logger.info(f"Reporte Q1 enviado: {len(q1_transactions)} transacciones")
-            
-            if q3_transactions:
-                csv_q3 = self._convert_q3_to_csv(q3_transactions)
-                self._send_report_via_protocol(protocol, csv_q3, "Q3")
-                logger.info(f"Reporte Q3 enviado: {len(q3_transactions)} registros")
-                
-            if q4_transactions:
-                csv_q4 = self._convert_q4_to_csv(q4_transactions)
-                self._send_report_via_protocol(protocol, csv_q4, "Q4")
-                logger.info(f"Reporte Q4 enviado: {len(q4_transactions)} registros")
+            # Enviar reportes al cliente
+            self._send_reports_to_client(protocol, report_data)
             
             self.report_middleware.close()
             
@@ -237,27 +165,131 @@ class Gateway:
             logger.error(f"Error esperando reportes: {e}")
             self._send_error_to_client(protocol, f"Error processing reports: {e}")
 
-    def _convert_q3_to_csv(self, records):
-        """Convierte registros Q3 a formato CSV."""
+    def _collect_reports_from_pipeline(self):
+        """Recopila todos los reportes del pipeline."""
+        report_data = {
+            'q1': [],
+            'q3': [],
+            'q4': []
+        }
+        eof_count = 0
+        
+        def report_callback(ch, method, properties, body):
+            nonlocal eof_count
+            
+            try:
+                dto = ReportBatchDTO.from_bytes_fast(body)
+                routing_key = method.routing_key
+                query_name = routing_key.split('.')[0]
+                
+                logger.info(f"Recibido mensaje para {query_name}: {dto.batch_type}, routing: {routing_key}")
+                
+                if routing_key.endswith('.eof'):
+                    eof_count += 1
+                    logger.info(f"EOF recibido para {query_name}. Total EOF: {eof_count}")
+                    
+                    # DEBUG: ¿Recibimos datos de Q4 antes del EOF?
+                    if query_name == "q4":
+                        logger.info(f"Q4 EOF recibido - datos acumulados: {len(report_data['q4'])}")
+                    
+                    
+                    if eof_count >= 3:
+                        logger.info("Todos los reportes recibidos completamente")
+                        ch.stop_consuming()
+                    return
+                
+                if dto.batch_type == BatchType.RAW_CSV:
+                    self._process_report_batch(dto.data, query_name, report_data)
+                    logger.info(f"Batch procesado: Q1={len(report_data['q1'])}, Q3={len(report_data['q3'])}, Q4={len(report_data['q4'])}")
+                    
+            except Exception as e:
+                logger.error(f"Error procesando batch del reporte: {e}")
+        
+        # Consumir batches hasta recibir los 3 EOF
+        self.report_middleware.start_consuming(report_callback)
+        return report_data
+
+    def _process_report_batch(self, data, query_name, report_data):
+        """Procesa un batch de datos para una query específica."""
+        lines = data.strip().split('\n')
+        
+        for line in lines:
+            if not line.strip():
+                continue
+                
+            values = line.split(',')
+            
+            if query_name == "q1" and len(values) >= 2:
+                report_data['q1'].append({
+                    "transaction_id": values[0],
+                    "final_amount": values[1]
+                })
+            elif query_name == "q3" and len(values) >= 3:
+                report_data['q3'].append({
+                    "year_half": values[0],
+                    "store_name": values[1],
+                    "tpv": values[2]
+                })
+            elif query_name == "q4" and len(values) >= 2:
+                report_data['q4'].append({
+                    "store_name": values[0],
+                    "birthdate": values[1],
+                })
+
+    def _send_reports_to_client(self, protocol, report_data):
+        """Envía todos los reportes al cliente."""
+        # Mapeo de queries a convertidores y nombres
+        reports_config = [
+            ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
+            ('q3', self._convert_q3_to_csv, "Q3", "registros"),
+            ('q4', self._convert_q4_to_csv, "Q4", "registros")
+        ]
+        
+        for query_key, converter_func, report_name, unit_name in reports_config:
+            transactions = report_data[query_key]
+            
+            if transactions:
+                csv_content = converter_func(transactions)
+                self._send_report_via_protocol(protocol, csv_content, report_name)
+                logger.info(f"Reporte {report_name} enviado: {len(transactions)} {unit_name}")
+            else:
+                logger.warning(f"No se encontraron datos para {report_name}")
+            
+    def _convert_q1_to_csv(self, transactions):
+        """
+        Convierte lista de transacciones a formato CSV SIN HEADERS.
+        """
         try:
-            csv_lines = ["year_half_created_at,store_name,tpv"]
+            csv_lines = []
+            for transaction in transactions:
+                csv_lines.append(f"{transaction['transaction_id']},{transaction['final_amount']}")
+            
+            return '\n'.join(csv_lines)
+        except Exception as e:
+            logger.error(f"Error convirtiendo transacciones a CSV: {e}")
+            return "ERROR,0"
+
+    def _convert_q3_to_csv(self, records):
+        """Convierte registros Q3 a formato CSV SIN HEADERS."""
+        try:
+            csv_lines = []
             for record in records:
                 csv_lines.append(f"{record['year_half']},{record['store_name']},{record['tpv']}")
             return '\n'.join(csv_lines)
         except Exception as e:
             logger.error(f"Error convirtiendo Q3 a CSV: {e}")
-            return "year_half_created_at,store_name,tpv\nERROR,ERROR,0"
+            return "ERROR,ERROR,0"
 
     def _convert_q4_to_csv(self, records):
-        """Convierte registros Q4 a formato CSV."""
+        """Convierte registros Q4 a formato CSV SIN HEADERS."""
         try:
-            csv_lines = ["user_id,total_spent,total_transactions"]
+            csv_lines = []
             for record in records:
-                csv_lines.append(f"{record['user_id']},{record['total_spent']},{record['total_transactions']}")
+                csv_lines.append(f"{record['store_name']},{record['birthdate']}")
             return '\n'.join(csv_lines)
         except Exception as e:
             logger.error(f"Error convirtiendo Q4 a CSV: {e}")
-            return "user_id,total_spent,total_transactions\nERROR,0,0"
+            return "ERROR,0,0"
 
     def _send_report_via_protocol(self, protocol, csv_content, report_name="RPRT"):
         """Envía un reporte usando el protocolo existente."""
@@ -269,36 +301,21 @@ class Gateway:
                 logger.error(f"Error enviando reporte {report_name}")
         except Exception as e:
             logger.error(f"Error enviando reporte {report_name}: {e}")
-        
-    def _convert_transactions_to_csv(self, transactions):
-        """
-        Convierte lista de transacciones a formato CSV.
-        """
-        try:
-            # Crear CSV
-            csv_lines = ["transaction_id,final_amount"]
-            for transaction in transactions:
-                csv_lines.append(f"{transaction['transaction_id']},{transaction['final_amount']}")
-            
-            return '\n'.join(csv_lines)
-        except Exception as e:
-            logger.error(f"Error convirtiendo transacciones a CSV: {e}")
-            return "transaction_id,final_amount\nERROR,0"
 
-    def _send_report_via_protocol(self, protocol, csv_content):
-        """
-        Envía el reporte usando el protocolo existente en batches.
-        """
-        try:
-            # Usar el método de batches del protocolo para enviar respuesta
-            success = protocol.send_response_batches("RPRT", "R", csv_content)
-            if success:
-                logger.info(f"Reporte enviado exitosamente en batches: {len(csv_content)} bytes")
-            else:
-                logger.error("Error enviando reporte en batches")
+    # def _send_report_via_protocol(self, protocol, csv_content):
+    #     """
+    #     Envía el reporte usando el protocolo existente en batches.
+    #     """
+    #     try:
+    #         # Usar el método de batches del protocolo para enviar respuesta
+    #         success = protocol.send_response_batches("RPRT", "R", csv_content)
+    #         if success:
+    #             logger.info(f"Reporte enviado exitosamente en batches: {len(csv_content)} bytes")
+    #         else:
+    #             logger.error("Error enviando reporte en batches")
             
-        except Exception as e:
-            logger.error(f"Error enviando reporte via protocolo: {e}")
+    #     except Exception as e:
+    #         logger.error(f"Error enviando reporte via protocolo: {e}")
 
     def _send_error_to_client(self, protocol, error_message):
         """

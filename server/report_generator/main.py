@@ -30,21 +30,41 @@ class ReportGenerator:
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
             
-            query_name = routing_key.split('.')[0]  # 'q1' o 'q3'
-            
-            if dto.batch_type == BatchType.EOF:
+            query_name = routing_key.split('.')[0]                       
+            if routing_key.endswith('.eof'):
                 logger.info(f"EOF recibido para {query_name}")
                 self._close_csv_file(query_name)
                 self.eof_received.add(query_name)
                 
-                # Si recibimos EOF de todas las queries (Q1, Q3, Q4), terminar
+                # CORREGIR: Verificar que tengamos EXACTAMENTE Q1, Q3, Q4
+                logger.info(f"EOF recibidos: {self.eof_received}")
+                
+                # PROBLEMA: Esto se ejecuta cuando llegan Q1 y Q3, pero Q4 aún no terminó
                 if len(self.eof_received) >= 3:
-                    logger.info("Todos los reportes completados (Q1, Q3, Q4)")
-                    self._publish_reports()
-                    return True
-                                
-
+                    expected_queries = {'q1', 'q3', 'q4'}
+                    if self.eof_received == expected_queries:
+                        logger.info("Todos los reportes completados (Q1, Q3, Q4)")
+                        self._publish_reports()
+                        return True
+                    else:
+                        logger.warning(f"EOF count = 3 pero queries incorrectas: {self.eof_received}")
+                
                 return False
+            
+            if routing_key.endswith('.data'):
+                if message == b"EOF:1":
+                    logger.info(f"EOF recibido para {query_name}")
+                    self._close_csv_file(query_name)
+                    self.eof_received.add(query_name)
+                
+                    if len(self.eof_received) >= 3:
+                        expected_queries = {'q1', 'q3', 'q4'}
+                        if self.eof_received == expected_queries:
+                            logger.info("Todos los reportes completados (Q1, Q3, Q4)")
+                            self._publish_reports()
+                            return False
+                        else:
+                            logger.warning(f"EOF count = 3 pero queries incorrectas: {self.eof_received}")
             
             if dto.batch_type == BatchType.RAW_CSV:
                 self._write_to_csv(dto.data, query_name)
@@ -58,6 +78,7 @@ class ReportGenerator:
     def on_message_callback(self, ch, method, properties, body):
         """Callback para RabbitMQ cuando llega un mensaje."""
         try:
+            logger.info(f"Mensaje recibido con routing key: {method.routing_key}")
             routing_key = method.routing_key  # ✅ Obtener routing key
             should_stop = self.process_message(body, routing_key)  # ✅ Pasar routing key
             
@@ -169,6 +190,7 @@ class ReportGenerator:
                 reports_dir = './reports'
                 files = [f for f in os.listdir(reports_dir) if f.startswith(query_name) and f.endswith('.csv')]
 
+                logger.info(f"Publicando reportes para {query_name}, archivos encontrados: {files}")
                 for file in files:
                     file_path = os.path.join(reports_dir, file)
                     with open(file_path, 'r', encoding='utf-8') as f:

@@ -3,6 +3,7 @@ import socket
 import logging
 from common.processor import TransactionCSVProcessor
 from common.protocol import Protocol
+from common.new_protocolo import ProtocolNew
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class Client:
             logger.info(f"Conectando al servidor en el puerto {self.server_port}")
             self.client_socket = socket.create_connection(('gateway', self.server_port))
             
-            self.protocol = Protocol(self.client_socket)
+            self.protocol = ProtocolNew(self.client_socket)
 
             self.process_and_send_files_from_volumes()
 
@@ -65,6 +66,7 @@ class Client:
             
             if self.protocol:
                 self.protocol.send_exit_message()
+                self.receive_reports()
 
         except Exception as e:
             logger.error(f"Error procesando archivos desde volúmenes: {e}")
@@ -94,7 +96,62 @@ class Client:
         except Exception as e:
             logger.error(f"Error en send_data: {e}")
             raise
+        
+        
+    def receive_reports(self):
+        """Recibe reportes del servidor hasta que se envíe un mensaje de salida."""
+        try:
+            if not self.protocol:
+                logger.error("Protocolo no inicializado. No se pueden recibir reportes.")
+                return
+            
+            logger.info("Esperando reportes del servidor...")
+            
+            # Esperamos recibir 3 reportes: Q1, Q3, Q4
+            expected_reports = 3
+            reports_received = 0
+            
+            while self.keep_running and reports_received < expected_reports:
+                logger.info(f"Esperando reporte {reports_received + 1} de {expected_reports}...")
+                
+                report = self.protocol.receive_report()  # ← Retorna dict
+                
+                if report is None:
+                    logger.info("No se recibieron más reportes o conexión cerrada.")
+                    break
+                
+                reports_received += 1
+                
+                # Extraer datos del dict
+                query_id = report['query_id']
+                content = report['content']
+                
+                logger.info(f"Reporte Q{query_id} recibido: {len(content)} bytes")
+                
+                # Guardar reporte en archivo usando el content (str)
+                self._save_report_to_file(f"Q{query_id}", content)
+            
+            logger.info(f"Recepción completada. {reports_received} reportes recibidos.")
+            
+        except Exception as e:
+            logger.error(f"Error recibiendo reportes: {e}")
+            raise
     
+    def _save_report_to_file(self, report_type, content):
+        """Guarda un reporte en un archivo."""
+        try:
+            # Crear directorio report si no existe
+            report_dir = "/app/report"
+            os.makedirs(report_dir, exist_ok=True)
+            
+            # Guardar en la carpeta mapeada
+            filename = f"{report_dir}/report_{report_type.lower()}.csv"
+            with open(filename, 'w') as f:
+                f.write(content)
+            logger.info(f"Reporte {report_type} guardado en {filename}")
+        except Exception as e:
+            logger.error(f"Error guardando reporte {report_type}: {e}")
+        
     def _cleanup(self):
         """Limpieza de recursos al finalizar."""
         self.keep_running = False
