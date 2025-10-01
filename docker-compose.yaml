@@ -415,6 +415,7 @@ services:
       - AGGREGATOR_YEAR=2024
       - OUTPUT_EXCHANGE=best_selling.exchange
       - TOTAL_GROUPBY_NODES=1
+      - TOTAL_GROUPBY_NODES=1
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -434,6 +435,7 @@ services:
       - INPUT_EXCHANGE=year_data.exchange
       - AGGREGATOR_YEAR=2025
       - OUTPUT_EXCHANGE=best_selling.exchange
+      - TOTAL_GROUPBY_NODES=1
       - TOTAL_GROUPBY_NODES=1
     volumes:
       - ./server/config.ini:/app/config.ini
@@ -455,6 +457,7 @@ services:
       - INPUT_EXCHANGE=best_selling.exchange
       - OUTPUT_EXCHANGE=best_selling_to_final.exchange
       - TOTAL_INTERMEDIATE_AGGREGATORS=1
+      - TOTAL_INTERMEDIATE_AGGREGATORS=1
       - AGGREGATOR_TYPE=best_selling_intermediate
     volumes:
       - ./server/config.ini:/app/config.ini
@@ -475,6 +478,7 @@ services:
       - AGGREGATOR_YEAR=2025
       - INPUT_EXCHANGE=best_selling.exchange
       - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - TOTAL_INTERMEDIATE_AGGREGATORS=1
       - TOTAL_INTERMEDIATE_AGGREGATORS=1
       - AGGREGATOR_TYPE=best_selling_intermediate
     volumes:

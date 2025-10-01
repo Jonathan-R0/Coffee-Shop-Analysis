@@ -15,7 +15,6 @@ class Client:
         self.client_socket = None
         self.protocol = None  
         self.processor = None
-        #Modificar cuando quiera mas querys
         self.expected_reports = 5
     
     def run(self):

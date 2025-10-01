@@ -59,7 +59,7 @@ class ReportGenerator:
                         self._publish_reports()
                         return True
                     else:
-                        logger.warning(f"EOF count = 3 pero queries incorrectas: {self.eof_received}")
+                        logger.warning(f"EOF co   if dto.batch_type == BatchType.EOF:unt = 3 pero queries incorrectas: {self.eof_received}")
                 return False
             
             # if routing_key.endswith('.data'):
