@@ -290,9 +290,79 @@ def write_aggregator_final_service(f):
       - ./server/config.ini:/app/config.ini
 """)
 
+def write_top_consumers_aggregator_service(f, aggregator_id, total_top_consumers_aggregators):
+    f.write(f"""  top_consumers_aggregator_{aggregator_id}:
+    build:
+      context: .
+      dockerfile: ./server/aggregator/Dockerfile
+    container_name: top_consumers_aggregator_{aggregator_id}
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - AGGREGATOR_MODE=intermediate
+      - TOPK_NODE_ID={aggregator_id}
+      - INPUT_QUEUE=aggregated_data_{aggregator_id}
+      - OUTPUT_EXCHANGE=topk.exchange
+      - TOTAL_TOPK_NODES={total_top_consumers_aggregators}
+      - AGGREGATOR_TYPE=top_consumers_intermediate
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+""")
+
+def write_top_consumers_aggregator_final_service(f, total_top_consumers_aggregators):
+    f.write(f"""  top_consumers_aggregator_final:
+    build:
+      context: .
+      dockerfile: ./server/aggregator/Dockerfile
+    container_name: top_consumers_aggregator_final
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - AGGREGATOR_MODE=final
+      - TOTAL_TOPK_NODES={total_top_consumers_aggregators}
+      - INPUT_EXCHANGE=topk.exchange
+      - OUTPUT_EXCHANGE=join.exchange
+      - AGGREGATOR_TYPE=top_consumers_final
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+""")
+
+def write_groupby_top_customers_service(f, instance_id, total_groupby_top_customers):
+    f.write(f"""  groupby_top_customers_{instance_id}:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_top_customers_{instance_id}
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=top_customers
+      - INPUT_QUEUE=year_filtered_q4 
+      - OUTPUT_EXCHANGE=aggregated.exchange
+      - TOTAL_GROUPBY_NODES={total_groupby_top_customers}
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+""")
+
 def generate_docker_compose(filename, year_transactions_count, year_transaction_items_count, 
                           hour_count, amount_count, groupby_2024_count, groupby_2025_count,
-                          aggregator_2024_count, aggregator_2025_count):
+                          aggregator_2024_count, aggregator_2025_count, groupby_top_customers_count, 
+                          top_consumers_aggregator_count):
     
     with open(filename, 'w') as f:
         write_base_services(f)
@@ -348,10 +418,22 @@ def generate_docker_compose(filename, year_transactions_count, year_transaction_
         
         # Final aggregator
         write_aggregator_final_service(f)
+        
+        # Top consumers aggregator services
+        for i in range(1, top_consumers_aggregator_count + 1):
+            write_top_consumers_aggregator_service(f, i, top_consumers_aggregator_count)
+        
+        # Top consumers aggregator final
+        if top_consumers_aggregator_count > 0:
+            write_top_consumers_aggregator_final_service(f, top_consumers_aggregator_count)
+        
+        # Groupby top customers services
+        for i in range(1, groupby_top_customers_count + 1):
+            write_groupby_top_customers_service(f, i, groupby_top_customers_count)
 
 def main():
-    if len(sys.argv) != 10:
-        print("Usage: python configure_nodes_new.py <filename> <year_transactions> <year_transaction_items> <hour> <amount> <groupby_2024> <groupby_2025> <aggregator_2024> <aggregator_2025>")
+    if len(sys.argv) != 12:
+        print("Usage: python configure_nodes.py <filename> <year_transactions> <year_transaction_items> <hour> <amount> <groupby_2024> <groupby_2025> <aggregator_2024> <aggregator_2025> <groupby_top_customers> <top_consumers_aggregator>")
         sys.exit(1)
     
     filename = sys.argv[1]
@@ -363,10 +445,13 @@ def main():
     groupby_2025_count = int(sys.argv[7])
     aggregator_2024_count = int(sys.argv[8])
     aggregator_2025_count = int(sys.argv[9])
+    groupby_top_customers_count = int(sys.argv[10])
+    top_consumers_aggregator_count = int(sys.argv[11])
     
     generate_docker_compose(filename, year_transactions_count, year_transaction_items_count,
                           hour_count, amount_count, groupby_2024_count, groupby_2025_count,
-                          aggregator_2024_count, aggregator_2025_count)
+                          aggregator_2024_count, aggregator_2025_count, groupby_top_customers_count, 
+                          top_consumers_aggregator_count)
     
     print(f"Docker compose file '{filename}' generated successfully")
 

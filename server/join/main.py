@@ -19,7 +19,7 @@ class JoinNode:
             host=self.rabbitmq_host,
             queue_name='join_input_queue',
             exchange_name=self.input_exchange,
-            routing_keys=['stores.data', 'tpv.data', 'stores.eof', 'tpv.eof', 
+            routing_keys=['stores.data', 'tpv.data', 'tpv.eof', 
                        'top_customers.data', 'top_customers.eof',
                        'users.data', 'users.eof',
                        'menu_items.data',
@@ -321,18 +321,18 @@ class JoinNode:
         joined_top_customers = []
         joined_count = 0
         missing_users = set()
+        missing_stores = set()  
         found_users = 0
 
         for customer_record in self.top_customers_data:
             store_id = customer_record['store_id']
             user_id = customer_record['user_id']
             
-            # Para Q4, usar store_id como store_name si no hay stores cargados
             if self.stores_loaded and store_id in self.stores_data:
-
                 store_name = self.stores_data[store_id]['store_name']
             else:
-                store_name = f"Store_{store_id}"  # Usar store_id como fallback
+                missing_stores.add(store_id)  
+                store_name = f"Store_{store_id}"  
             
             if user_id in self.users_data:
                 birthdate = self.users_data[user_id]['birth_date']
@@ -424,13 +424,12 @@ class JoinNode:
         logger.info("EOF recibido de stores")
         self.stores_loaded = True
         
-        # Query 3: Si hay datos TPV y todos los GroupBy han terminado, enviar Q3
         if self.tpv_data and self.groupby_eof_count >= self.expected_groupby_nodes and not self.q3_results_sent:
 
             self._perform_join()
             logger.info("Stores y GroupBy completados - enviando Q3")
             self._send_results_to_exchange()
-            self.q3_results_sent = True  # ← AGREGAR ESTA LÍNEA
+            self.q3_results_sent = True  
         
         if self.top_customers_data and self.users_loaded and not self.top_customers_sent:
             logger.info("Stores y users cargados - enviando Q4")
@@ -470,7 +469,6 @@ class JoinNode:
         self.groupby_eof_count += 1
         logger.info(f"EOF TPV recibido: {self.groupby_eof_count}/{self.expected_groupby_nodes}")
         
-        # Query 3: Solo enviar cuando todos los GroupBy hayan terminado Y stores estén cargados
         if self.groupby_eof_count >= self.expected_groupby_nodes and not self.q3_results_sent:
 
             if self.stores_loaded:
@@ -478,7 +476,7 @@ class JoinNode:
                     self._perform_join()
                 logger.info("Todos los GroupBy y stores completados - enviando Q3")
                 self._send_results_to_exchange()
-                self.q3_results_sent = True  # ← AGREGAR ESTA LÍNEA
+                self.q3_results_sent = True 
             else:
                 logger.info("Todos los GroupBy completados, esperando stores...")
         
@@ -523,7 +521,7 @@ class JoinNode:
                 missing.append("users")
             logger.info(f"Top customers completado, esperando EOF de: {', '.join(missing)} para enviar Q4")
         
-        return False  # No cerrar el nodo
+        return False  
 
     
     def _send_results_to_exchange(self):
@@ -628,7 +626,7 @@ class JoinNode:
     
     def process_message(self, message: bytes, routing_key: str) -> bool:
         try:
-            if routing_key in ['stores.data', 'stores.eof']:
+            if routing_key == 'stores.data':
                 dto = StoreBatchDTO.from_bytes_fast(message)
                 if dto.batch_type == BatchType.EOF:
                     return self._handle_store_eof()

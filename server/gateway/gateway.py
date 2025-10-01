@@ -20,7 +20,7 @@ class Gateway:
         self._server_socket.bind(('', port))
         self._server_socket.listen(listener_backlog)
         self._is_running = False
-        self.max_expected_reports = 3
+        self.max_expected_reports = 5
         self.reports_config = [
             ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
             ('q3', self._convert_q3_to_csv, "Q3", "registros"),
@@ -38,7 +38,7 @@ class Gateway:
         self._join_middleware = MessageMiddlewareExchange(
             host=rabbitmq_host,
             exchange_name=store_exchange,
-            route_keys=['stores.data', 'stores.eof','users.data','users.eof', 'menu_items.data']
+            route_keys=['stores.data','users.data','users.eof', 'menu_items.data']
         )
         
         self.report_middleware = MessageMiddlewareExchange(
@@ -97,7 +97,7 @@ class Gateway:
                 
             elif file_type == "S":
                 eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='stores.eof')
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='stores.data')
                 logger.info("EOF:1 enviado para tipo S (stores)")
 
             elif file_type == "U":
