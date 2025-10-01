@@ -125,7 +125,6 @@ class BestSellingAggregatorNode:
             logger.info(f"  Output Exchange: {output_exchange}")
     
     def process_csv_line(self, csv_line: str, routing_key: str = None):
-        """Procesa una línea CSV según el modo y routing key"""
         try:
             parts = csv_line.split(',')
             if len(parts) < 3 or parts[0] == 'created_at':
@@ -220,19 +219,18 @@ class BestSellingAggregatorNode:
             
             if self.mode == 'intermediate':
                 logger.info(f"EOF recibido con counter={counter}, total={self.total_groupby_nodes}")
-                
-                self._send_intermediate_results()
-                
+                                
                 if counter < self.total_groupby_nodes:
                     new_counter = counter + 1
                     eof_dto = TransactionItemBatchDTO(f"EOF:{new_counter}", BatchType.EOF)
                     self.input_middleware.send(eof_dto.to_bytes_fast())
                     logger.info(f"EOF:{new_counter} reenviado a input queue")
                     logger.info("Datos enviados - esperando otros nodos")
-                    return False
+                    #return False
                 else:
                     logger.info(f"Último nodo intermediate del año {self.year} procesado")
                     eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
+                    self._send_intermediate_results()
                     self.output_middleware.send(
                         eof_dto.to_bytes_fast(), 
                         routing_key='top_selling.data'
@@ -241,7 +239,8 @@ class BestSellingAggregatorNode:
                         eof_dto.to_bytes_fast(), 
                         routing_key='top_profit.data'
                     )
-                    return True
+                    #return True
+                return True
                     
             elif self.mode == 'final':
                 if routing_key and 'top_selling' in routing_key:
@@ -286,16 +285,6 @@ class BestSellingAggregatorNode:
             routing_key='top_profit.data'
         )
         
-        eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
-        self.output_middleware.send(
-            eof_dto.to_bytes_fast(), 
-            routing_key='top_selling.eof'
-        )
-        self.output_middleware.send(
-            eof_dto.to_bytes_fast(), 
-            routing_key='top_profit.eof'
-        )
-        
         logger.info(f"[INTERMEDIATE] Resultados enviados para año {self.year}")
         logger.info(f"  Top selling: {len(best_selling)} meses")
         logger.info(f"  Most profit: {len(most_profit)} meses")
@@ -332,22 +321,12 @@ class BestSellingAggregatorNode:
         logger.info(f"  Top selling: {len(best_selling)} meses")
         logger.info(f"  Most profit: {len(most_profit)} meses")
         
-        print(f"\n{'='*70}")
-        print(f"[Q2 FINAL] Mejor producto vendido por mes (2024-2025):")
-        for month in sorted(best_selling.keys()):
-            item_id, qty = best_selling[month]
-            print(f"  {month}: item {item_id} con {qty} ventas")
-        print(f"\n[Q2 FINAL] Producto más rentable por mes (2024-2025):")
-        for month in sorted(most_profit.keys()):
-            item_id, profit = most_profit[month]
-            print(f"  {month}: item {item_id} con ${profit:.2f}")
-        print(f"{'='*70}\n")
     
     def process_message(self, message: bytes, routing_key: str = None) -> bool:
         try:
             dto = TransactionItemBatchDTO.from_bytes_fast(message)
             
-            if dto.batch_type == BatchType.EOF or (routing_key and routing_key.endswith('.eof')):
+            if dto.batch_type == BatchType.EOF:
                 return self.handle_eof(dto, routing_key)
             
             if dto.batch_type == BatchType.RAW_CSV:

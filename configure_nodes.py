@@ -1,255 +1,374 @@
 #!/usr/bin/env python3
 import sys
 
-def base_services_setup(f):
-    """Escribe los servicios base del docker-compose."""
-    f.write(
-        "services:\n"
-        "  rabbitmq:\n"
-        "    build:\n"
-        "      context: ./rabbitmq\n"
-        "      dockerfile: Dockerfile\n"
-        "    ports:\n"
-        "      - \"5672:5672\"\n"
-        "      - \"15672:15672\"\n"
-        "    healthcheck:\n"
-        "      test: [\"CMD\", \"rabbitmq-diagnostics\", \"ping\"]\n"
-        "      interval: 10s\n"
-        "      timeout: 5s\n"
-        "      retries: 10\n"
-        "    environment:\n"
-        "      - RABBITMQ_DEFAULT_USER=admin\n"
-        "      - RABBITMQ_DEFAULT_PASS=admin\n\n"
-        
-        "  client:\n"
-        "    build:\n"
-        "      context: .\n"
-        "      dockerfile: ./client/Dockerfile\n"
-        "    restart: on-failure\n"
-        "    environment:\n"
-        "      - PYTHONUNBUFFERED=1\n"
-        "      - RABBITMQ_HOST=rabbitmq\n"
-        "    depends_on:\n"
-        "      gateway:\n"
-        "        condition: service_started\n"
-        "    volumes:\n"
-        "      - ./client/config.ini:/config.ini\n"
-        "      - ./data/transaction_items:/data/transaction_items\n"
-        "      - ./data/users:/data/users\n"
-        "      - ./data/stores:/data/stores\n"
-        "      - ./data/menu_items:/data/menu_items\n"
-        "      - ./data/payment_methods:/data/payment_methods\n"
-        "      - ./data/vouchers:/data/vouchers\n\n"
-        "      - ./data/transactions:/data/transactions\n\n"
-        "      - ./data/transactions_test:/data/transactions_test\n"
-        "      - ./reports:/reports\n\n"
-        
-        "  gateway:\n"
-        "    build:\n"
-        "      context: .\n"
-        "      dockerfile: ./server/gateway/Dockerfile\n"
-        "    container_name: gateway\n"
-        "    restart: on-failure\n"
-        "    depends_on:\n"
-        "      rabbitmq:\n"
-        "        condition: service_healthy\n"
-        "    environment:\n"
-        "      - PYTHONUNBUFFERED=1\n"
-        "      - RABBITMQ_HOST=rabbitmq\n"
-        "      - OUTPUT_QUEUE=raw_data\n"
-        "      - REPORTS_EXCHANGE=reports_exchange\n"
-        "    volumes:\n"
-        "      - ./server/config.ini:/app/config.ini\n\n"
-    )
+def write_base_services(f):
+    f.write("""services:
+  rabbitmq:
+    build:
+      context: ./rabbitmq
+      dockerfile: Dockerfile
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
 
-def filter_service_setup(f, filter_type, instance_id, input_queue, output_queue=None, total_count=None):
-    """Escribe un servicio de filtro específico."""
-    service_name = f"filter_{filter_type}_{instance_id}"
-    
-    f.write(
-        f"  {service_name}:\n"
-        f"    build:\n"
-        f"      context: .\n"
-        f"      dockerfile: ./server/filter/Dockerfile\n"
-        f"    container_name: {service_name}\n"
-        f"    restart: on-failure\n"
-        f"    depends_on:\n"
-        f"      rabbitmq:\n"
-        f"        condition: service_healthy\n"
-        f"    environment:\n"
-        f"      - PYTHONUNBUFFERED=1\n"
-        f"      - RABBITMQ_HOST=rabbitmq\n"
-        f"      - FILTER_MODE={filter_type}\n"
-        f"      - INPUT_QUEUE={input_queue}\n"
-    )
-    
-    # Agregar OUTPUT_Q1 solo si se especifica
-    if output_queue:
-        f.write(f"      - OUTPUT_Q1={output_queue}\n")
-    
-    # Agregar variable de entorno con el total de este tipo de filtro
-    if total_count is not None:
-        f.write(f"      - TOTAL_{filter_type.upper()}_FILTERS={total_count}\n")
-    
-    # Configuraciones específicas por tipo de filtro
-    if filter_type == 'year':
-        f.write("      - FILTER_YEARS=2024,2025\n")
-    elif filter_type == 'hour':
-        f.write("      - FILTER_HOURS=06:00-22:59\n")
-        # Los filtros hour son donde se ramifica: query 1 (amount) y query 3 (groupby)
-        f.write("      - OUTPUT_Q3=groupby.join.exchange\n")
-    elif filter_type == 'amount':
-        f.write("      - MIN_AMOUNT=75\n")
-    
-    f.write(
-        f"    volumes:\n"
-        f"      - ./server/config.ini:/app/config.ini\n\n"
-    )
+  client:
+    build:
+      context: .
+      dockerfile: ./client/Dockerfile
+    restart: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      gateway:
+        condition: service_started
+    volumes:
+      - ./client/config.ini:/config.ini
+      - ./data/transaction_items:/data/transaction_items
+      - ./data/users:/data/users
+      - ./data/stores:/data/stores
+      - ./data/menu_items:/data/menu_items
+      - ./data/payment_methods:/data/payment_methods
+      - ./data/vouchers:/data/vouchers
+      - ./data/transactions:/data/transactions
+      - ./data/transactions_test:/data/transactions_test
+      - ./report:/app/report
+      - ./data/transactions_items_test:/data/transactions_items_test
 
+  gateway:
+    build:
+      context: .
+      dockerfile: ./server/gateway/Dockerfile
+    container_name: gateway
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - OUTPUT_QUEUE=raw_data
+      - REPORTS_EXCHANGE=reports_exchange
+      - JOIN_EXCHANGE=join.exchange
+      - OUTPUT_EXCHANGE=raw_data_exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
-def groupby_service_setup(f, semester):
-    """Escribe un servicio de groupby específico para un semestre."""
-    service_name = f"groupby_semester_{semester}"
-    
-    f.write(
-        f"  {service_name}:\n"
-        f"    build:\n"
-        f"      context: .\n"
-        f"      dockerfile: ./server/groupby/Dockerfile\n"
-        f"    container_name: {service_name}\n"
-        f"    restart: on-failure\n"
-        f"    depends_on:\n"
-        f"      rabbitmq:\n"
-        f"        condition: service_healthy\n"
-        f"    environment:\n"
-        f"      - PYTHONUNBUFFERED=1\n"
-        f"      - RABBITMQ_HOST=rabbitmq\n"
-        f"      - SEMESTER={semester}\n"
-        f"      - INPUT_Q3=groupby.join.exchange\n"
-        f"      - TOTAL_GROUPBY_NODES=2\n"
-        f"    volumes:\n"
-        f"      - ./server/config.ini:/app/config.ini\n\n"
-    )
+""")
 
+def write_filter_year_service(f, instance_id, file_mode, year, nodes_for_year):
+    f.write(f"""  filter_year_{instance_id}:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_{instance_id}
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - INPUT_QUEUE=raw_data
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS={nodes_for_year}
+      - FILTER_YEARS={year}
+      - OUTPUT_Q4=year_filtered_q4
+      - OUTPUT_Q2=year_data.exchange
+      - INPUT_EXCHANGE=raw_data_exchange
+      - FILE_MODE={file_mode}
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
-def report_generator_service_setup(f, input_queue):
-    """Escribe el servicio de report_generator."""
-    f.write(
-        f"  report_generator:\n"
-        f"    build:\n"
-        f"      context: .\n"
-        f"      dockerfile: ./server/report_generator/Dockerfile\n"
-        f"    container_name: report_generator\n"
-        f"    restart: on-failure\n"
-        f"    depends_on:\n"
-        f"      rabbitmq:\n"
-        f"        condition: service_healthy\n"
-        f"    environment:\n"
-        f"      - PYTHONUNBUFFERED=1\n"
-        f"      - RABBITMQ_HOST=rabbitmq\n"
-        f"      - INPUT_QUEUE={input_queue}\n"
-        f"      - OUTPUT_EXCHANGE=reports_exchange\n"
-        f"      - QUERY_TYPE={query_type}\n"
-        f"    volumes:\n"
-        f"      - ./server/config.ini:/app/config.ini\n"
-        f"      - ./reports:/app/reports\n\n"
-    )
+""")
 
-def determine_queue_configuration(year_count, hour_count, amount_count, report_generator=True):
-    """Determina la configuración de colas basándose en los filtros activos."""
-    config = {}
-    
-    # Orden de procesamiento: year -> hour -> amount -> report_generator
-    current_input = "raw_data"
-    
-    if year_count > 0:
-        output = "year_filtered" if (hour_count > 0 or amount_count > 0) else ("final_data" if report_generator else None)
-        config['year'] = {'input': current_input, 'output': output}
-        current_input = "year_filtered"
-    
-    if hour_count > 0:
-        input_queue = current_input if year_count > 0 else "raw_data"
-        output = "hour_filtered" if amount_count > 0 else ("final_data" if report_generator else None)
-        config['hour'] = {'input': input_queue, 'output': output}
-        current_input = "hour_filtered"
-    
-    if amount_count > 0:
-        input_queue = current_input if (year_count > 0 or hour_count > 0) else "raw_data"
-        config['amount'] = {'input': input_queue, 'output': "final_data" if report_generator else None}
-        current_input = "final_data"
-    
-    # Si no hay filtros pero hay report_generator, toma directamente de raw_data
-    if report_generator and year_count == 0 and hour_count == 0 and amount_count == 0:
-        current_input = "raw_data"
-    
-    if report_generator:
-        config['report_generator'] = {'input': current_input, 'output': None}
-    
-    return config
+def write_filter_hour_service(f, instance_id, total_hour_filters):
+    f.write(f"""  filter_hour_{instance_id}:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_hour_{instance_id}
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=hour
+      - INPUT_QUEUE=year_filtered
+      - OUTPUT_Q1=hour_filtered
+      - TOTAL_HOUR_FILTERS={total_hour_filters}
+      - FILTER_HOURS=06:00-22:59
+      - OUTPUT_Q3=groupby.join.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
-def setup_docker_compose(filename, year_count, hour_count, amount_count, include_report_generator=True):
-    """Genera el archivo docker-compose.yaml completo."""
+""")
+
+def write_filter_amount_service(f, instance_id, total_amount_filters):
+    f.write(f"""  filter_amount_{instance_id}:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_{instance_id}
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=report.exchange
+      - TOTAL_AMOUNT_FILTERS={total_amount_filters}
+      - MIN_AMOUNT=75
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+""")
+
+def write_groupby_semester_services(f):
+    f.write("""  groupby_semester_1:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_semester_1
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - SEMESTER=1
+      - INPUT_Q3=groupby.join.exchange
+      - TOTAL_GROUPBY_NODES=2
+      - JOIN_EXCHANGE=join.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_semester_2:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_semester_2
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - SEMESTER=2
+      - INPUT_Q3=groupby.join.exchange
+      - TOTAL_GROUPBY_NODES=2
+      - JOIN_EXCHANGE=join.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+""")
+
+def write_report_generator_service(f):
+    f.write("""  report_generator:
+    build:
+      context: .
+      dockerfile: ./server/report_generator/Dockerfile
+    container_name: report_generator
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - INPUT_EXCHANGE=report.exchange
+      - REPORTS_EXCHANGE=reports_exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./reports:/app/reports
+
+""")
+
+def write_join_node_service(f):
+    f.write("""  join_node:
+    build:
+      context: .
+      dockerfile: ./server/join/Dockerfile
+    container_name: join_node
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - INPUT_EXCHANGE=join.exchange
+      - OUTPUT_EXCHANGE=report.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+""")
+
+def write_groupby_best_selling_service(f, instance_id, year, nodes_for_year):
+    f.write(f"""  groupby_best_selling_{instance_id}:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_{instance_id}
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - INPUT_EXCHANGE=year_data.exchange
+      - AGGREGATOR_YEAR={year}
+      - OUTPUT_EXCHANGE=best_selling.exchange
+      - TOTAL_GROUPBY_NODES={nodes_for_year}
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+""")
+
+def write_aggregator_service(f, year, aggregator_id, aggregators_for_year):
+    f.write(f"""  aggregator_year_{year}_{aggregator_id}:
+    build:
+      context: .
+      dockerfile: ./server/aggregator/Dockerfile
+    container_name: aggregator_year_{year}_{aggregator_id}
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - AGGREGATOR_MODE=intermediate
+      - AGGREGATOR_YEAR={year}
+      - INPUT_EXCHANGE=best_selling.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - TOTAL_INTERMEDIATE_AGGREGATORS={aggregators_for_year}
+      - AGGREGATOR_TYPE=best_selling_intermediate
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+""")
+
+def write_aggregator_final_service(f):
+    f.write("""  aggregator_best_selling_final:
+    build:
+      context: .
+      dockerfile: ./server/aggregator/Dockerfile
+    container_name: aggregator_best_selling_final
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - AGGREGATOR_MODE=final
+      - INPUT_EXCHANGE=best_selling_to_final.exchange
+      - INPUT_QUEUE=best_selling_final
+      - OUTPUT_EXCHANGE=join.exchange
+      - TOTAL_INTERMEDIATE=1
+      - AGGREGATOR_TYPE=best_selling_final
+    volumes:
+      - ./server/config.ini:/app/config.ini
+""")
+
+def generate_docker_compose(filename, year_transactions_count, year_transaction_items_count, 
+                          hour_count, amount_count, groupby_2024_count, groupby_2025_count,
+                          aggregator_2024_count, aggregator_2025_count):
+    
     with open(filename, 'w') as f:
-        # Servicios base
-        base_services_setup(f)
+        write_base_services(f)
         
-        # Determinar configuración de colas
-        queue_config = determine_queue_configuration(year_count, hour_count, amount_count, include_report_generator)
         
-        # Generar servicios de filtro year
-        if year_count > 0:
-            input_queue = queue_config['year']['input']
-            output_queue = queue_config['year']['output']
-            for i in range(1, year_count + 1):
-                filter_service_setup(f, 'year', i, input_queue, output_queue, year_count)
+        # Filter year services for transactions (2024)
+        for i in range(1, year_transactions_count + 1):
+            write_filter_year_service(f, i, "transactions", "2024,2025", year_transactions_count)
         
-        # Generar servicios de filtro hour
+        # Filter year services for transaction_items (2025)
+        start_idx = year_transactions_count + 1
+        for i in range(start_idx, start_idx + year_transaction_items_count):
+            write_filter_year_service(f, i, "transaction_items", "2024,2025", year_transaction_items_count)
+        
+        # Filter hour services
+        for i in range(1, hour_count + 1):
+            write_filter_hour_service(f, i, hour_count)
+        
+        # Groupby semester services (always 2)
         if hour_count > 0:
-            input_queue = queue_config['hour']['input']
-            output_queue = queue_config['hour']['output']
-            for i in range(1, hour_count + 1):
-                filter_service_setup(f, 'hour', i, input_queue, output_queue, hour_count)
-            
-            # Agregar servicios groupby para query 3 cuando hay filtros hour (punto de ramificación)
-            # Siempre exactamente 2 nodos: semester 1 y semester 2
-            groupby_service_setup(f, 1)  # Semester 1
-            groupby_service_setup(f, 2)  # Semester 2
+            write_groupby_semester_services(f)
         
-        # Generar servicios de filtro amount
-        if amount_count > 0:
-            input_queue = queue_config['amount']['input']
-            output_queue = queue_config['amount']['output']
-            for i in range(1, amount_count + 1):
-                filter_service_setup(f, 'amount', i, input_queue, output_queue, amount_count)
+        # Filter amount services
+        for i in range(1, amount_count + 1):
+            write_filter_amount_service(f, i, amount_count)
         
-        # Generar servicio de report_generator
-        if include_report_generator:
-            input_queue = queue_config['report_generator']['input']
-            report_generator_service_setup(f, input_queue)
+        # Report generator
+        write_report_generator_service(f)
+        
+        # Join node
+        write_join_node_service(f)
+        
+        # Groupby best selling services
+        instance_id = 1
+        
+        # 2024 nodes
+        for _ in range(groupby_2024_count):
+            write_groupby_best_selling_service(f, instance_id, 2024, groupby_2024_count)
+            instance_id += 1
+        
+        # 2025 nodes
+        for _ in range(groupby_2025_count):
+            write_groupby_best_selling_service(f, instance_id, 2025, groupby_2025_count)
+            instance_id += 1
+        
+        # Aggregator services
+        
+        for i in range(1, aggregator_2024_count + 1):
+            write_aggregator_service(f, 2024, i, aggregator_2024_count)
+        
+        for i in range(1, aggregator_2025_count + 1):
+            write_aggregator_service(f, 2025, i, aggregator_2025_count)
+        
+        # Final aggregator
+        write_aggregator_final_service(f)
 
 def main():
-    if len(sys.argv) < 5 or len(sys.argv) > 6:
-        print("Uso: python configure_nodes.py <nombre_archivo> <cant_year> <cant_hour> <cant_amount> [include_report_generator]")
+    if len(sys.argv) != 10:
+        print("Usage: python configure_nodes_new.py <filename> <year_transactions> <year_transaction_items> <hour> <amount> <groupby_2024> <groupby_2025> <aggregator_2024> <aggregator_2025>")
         sys.exit(1)
-
-    nombre_archivo = sys.argv[1]
-    cant_year = int(sys.argv[2])
-    cant_hour = int(sys.argv[3])
-    cant_amount = int(sys.argv[4])
     
-    # Por defecto incluir report_generator, a menos que se especifique false
-    include_report_generator = True
-    if len(sys.argv) == 6:
-        include_report_generator = sys.argv[5].lower() not in ['false', '0', 'no']
-
-    setup_docker_compose(nombre_archivo, cant_year, cant_hour, cant_amount, include_report_generator)
-    print(f"Archivo '{nombre_archivo}' generado exitosamente!")
-    print(f"Filtros year: {cant_year}, hour: {cant_hour}, amount: {cant_amount}")
-    print(f"GroupBy nodes: 2 (semester 1 y semester 2)")
-    if include_report_generator:
-        print("Report generator: incluido")
-    else:
-        print("Report generator: no incluido")
+    filename = sys.argv[1]
+    year_transactions_count = int(sys.argv[2])
+    year_transaction_items_count = int(sys.argv[3])
+    hour_count = int(sys.argv[4])
+    amount_count = int(sys.argv[5])
+    groupby_2024_count = int(sys.argv[6])
+    groupby_2025_count = int(sys.argv[7])
+    aggregator_2024_count = int(sys.argv[8])
+    aggregator_2025_count = int(sys.argv[9])
+    
+    generate_docker_compose(filename, year_transactions_count, year_transaction_items_count,
+                          hour_count, amount_count, groupby_2024_count, groupby_2025_count,
+                          aggregator_2024_count, aggregator_2025_count)
+    
+    print(f"Docker compose file '{filename}' generated successfully")
 
 if __name__ == "__main__":
     main()

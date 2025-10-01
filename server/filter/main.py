@@ -82,9 +82,7 @@ class FilterNode:
             
             if should_stop:
                 return True
-            
-            logger.info(f"Procesando batch_type: {batch_type}")
-            
+                        
             decoded_data = body.decode('utf-8').strip()
             
             if decoded_data.startswith("D:"):

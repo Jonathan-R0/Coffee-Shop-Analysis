@@ -106,23 +106,23 @@ class HourNodeConfigurator(NodeConfigurator):
         
         if counter < total_filters:
             self._forward_eof_to_input(counter + 1, eof_type, input_middleware)
-            return False
+            #return False
         
         elif counter == total_filters:
             logger.info(f"HourNode: EOF llegó al último filtro - enviando downstream y cerrando")
             self.send_eof(middlewares, "transactions")
-            return True
+            #return True
         
-        return False
+        return True
     
     def _forward_eof_to_input(self, new_counter: int, eof_type: str, input_middleware: Any):
 
-        eof_message = f"D:EOF:{new_counter}"
+        eof_message = f"EOF:{new_counter}"
 
         eof_dto = TransactionBatchDTO(eof_message, batch_type=BatchType.EOF)
         
         input_middleware.send(eof_dto.to_bytes_fast())
-        input_middleware.close()
+        #input_middleware.close()
         
         logger.info(f"HourNode: {eof_message} reenviado")
         

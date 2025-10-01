@@ -15,8 +15,8 @@ class ItemAggregation:
         self.sellings_qty = 0
         self.profit_sum = 0.0
     
-    def add_transaction(self, subtotal: float):
-        self.sellings_qty += 1
+    def add_transaction(self, quantity: int, subtotal: float): 
+        self.sellings_qty += quantity  
         self.profit_sum += subtotal
     
     def to_csv_line(self, year_month: str) -> str:
@@ -54,18 +54,20 @@ class BestSellingGroupByStrategy(GroupByStrategy):
         try:
             item_id = self.dto_helper.get_column_value(csv_line, 'item_id')
             created_at = self.dto_helper.get_column_value(csv_line, 'created_at')
+            quantity_str = self.dto_helper.get_column_value(csv_line, 'quantity') 
             subtotal_str = self.dto_helper.get_column_value(csv_line, 'subtotal')
             
-            if not all([item_id, created_at, subtotal_str]):
+            if not all([item_id, created_at, quantity_str, subtotal_str]):
                 return
             
-            year_month = created_at[:7]  
+            year_month = created_at[:7]
+            quantity = int(quantity_str) 
             subtotal = float(subtotal_str)
             
             if self.month_item_aggregations[year_month][item_id] is None:
                 self.month_item_aggregations[year_month][item_id] = ItemAggregation(item_id)
             
-            self.month_item_aggregations[year_month][item_id].add_transaction(subtotal)
+            self.month_item_aggregations[year_month][item_id].add_transaction(quantity, subtotal)  
             
         except (ValueError, IndexError) as e:
             logger.warning(f"Error procesando línea: {e}")
@@ -101,7 +103,7 @@ class BestSellingGroupByStrategy(GroupByStrategy):
                 middlewares["input_queue"].send(eof_dto.to_bytes_fast())
                 logger.info(f"EOF:{new_counter} reenviado a input queue")
                 logger.info("Datos enviados - esperando otros nodos")
-                return False  
+                #return False  
             else:
                 logger.info(f"Último nodo GroupBy del año {self.year} - iniciando EOF para aggregators")
                 eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
@@ -110,7 +112,8 @@ class BestSellingGroupByStrategy(GroupByStrategy):
                 logger.info(f"EOF:1 enviado al topic '{self.year}' para aggregators intermediate")
             
                 print(f"{'='*60}\n")
-                return True
+                #return True
+            return True
                         
         except Exception as e:
             logger.error(f"Error manejando EOF: {e}")
