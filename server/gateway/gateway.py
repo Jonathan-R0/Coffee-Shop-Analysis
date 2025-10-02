@@ -24,7 +24,7 @@ class Gateway:
         self.reports_config = [
             ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
             ('q3', self._convert_q3_to_csv, "Q3", "registros"),
-            # ('q4', self._convert_q4_to_csv, "Q4", "cumpleanos"),
+            ('q4', self._convert_q4_to_csv, "Q4", "cumpleanos"),
             ('q2_most_profit', self._convert_q2_most_profit_to_csv, "Q2_MOST_PROFIT", "items"),
             ('q2_best_selling', self._convert_q2_best_selling_to_csv, "Q2_BEST_SELLING", "items")
         ]
@@ -54,7 +54,7 @@ class Gateway:
 
         try:
             for message in protocol.receive_messages():
-                logger.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
+                # logger.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
 
                 if message.action == "EXIT":
                     logger.info(f"EXIT received")
@@ -122,7 +122,7 @@ class Gateway:
         try:
             dto = TransactionBatchDTO(message.data, BatchType.RAW_CSV)
             self._middleware.send(dto.to_bytes_fast(),routing_key='transactions')
-            logger.info(f"Transaction batch enviado con prefijo D:")
+            # logger.info(f"Transaction batch enviado con prefijo D:")
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'D': {e}")
 
@@ -130,7 +130,7 @@ class Gateway:
         try:
             dto = TransactionItemBatchDTO(message.data, BatchType.RAW_CSV)
             self._middleware.send(dto.to_bytes_fast(), routing_key='transaction_items')
-            logger.info(f"TransactionItem batch enviado con prefijo I:")
+            # logger.info(f"TransactionItem batch enviado con prefijo I:")
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'I': {e}")
             
@@ -145,7 +145,7 @@ class Gateway:
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
-            logger.info(f"Stores enviados a store_data queue: Líneas: {line_count}")
+            # logger.info(f"Stores enviados a store_data queue: Líneas: {line_count}")
             
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
@@ -161,7 +161,7 @@ class Gateway:
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
-            logger.info(f"Users enviados a users.data queue: Líneas: {line_count}")
+            # logger.info(f"Users enviados a users.data queue: Líneas: {line_count}")
 
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
@@ -177,7 +177,7 @@ class Gateway:
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
-            logger.info(f"Menu Items enviados a menu_items.data queue: Líneas: {line_count}")
+            # logger.info(f"Menu Items enviados a menu_items.data queue: Líneas: {line_count}")
 
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'M': {e}")
@@ -265,13 +265,13 @@ class Gateway:
             elif query_name == "q2_most_profit" and len(values) >= 3:
                 report_data['q2_most_profit'].append({
                     "year_month_created_at": values[0],
-                    "product_name": values[1],
+                    "item_name": values[1],
                     "profit_sum": values[2]
                 })
             elif query_name == "q2_best_selling" and len(values) >= 3:
                 report_data['q2_best_selling'].append({
                     "year_month_created_at": values[0],
-                    "product_name": values[1],
+                    "item_name": values[1],
                     "sellings_qty": values[2]
                 })
 
@@ -323,7 +323,7 @@ class Gateway:
         try:
             csv_lines = []
             for record in records:
-                csv_lines.append(f"{record['year_month_created_at']},{record['product_name']},{record['profit_sum']}")
+                csv_lines.append(f"{record['year_month_created_at']},{record['item_name']},{record['profit_sum']}")
             return '\n'.join(csv_lines)
         except Exception as e:
             logger.error(f"Error convirtiendo Q2 Most Profit a CSV: {e}")
@@ -335,7 +335,7 @@ class Gateway:
             logger.info(f"Convirtiendo {len(records)} registros de Q2 Best Selling a CSV")
             for record in records:
                 logger.info(f"Procesando registro: {record}")
-                csv_lines.append(f"{record['year_month_created_at']},{record['product_name']},{record['sellings_qty']}")
+                csv_lines.append(f"{record['year_month_created_at']},{record['item_name']},{record['sellings_qty']}")
             return '\n'.join(csv_lines)
         except Exception as e:
             logger.error(f"Error convirtiendo Q2 Best Selling a CSV: {e}")

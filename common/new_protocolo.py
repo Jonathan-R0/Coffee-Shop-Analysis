@@ -62,7 +62,7 @@ class ProtocolNew:
             
             # Contar items correctamente
             items_count = len(batch_result.items) if hasattr(batch_result, 'items') else csv_content.count('\n')
-            logger.info(f"Batch enviado y confirmado: {items_count} items, FILE-TYPE: {file_type}, LAST-BATCH: {is_last_batch}")
+            # logger.info(f"Batch enviado y confirmado: {items_count} items, FILE-TYPE: {file_type}, LAST-BATCH: {is_last_batch}")
             return True
             
         except Exception as e:

@@ -208,7 +208,7 @@ class BestSellingAggregatorNode:
             if metric_name == "sellings_qty":
                 csv_lines.append(f"{year_month},{item_id},{int(value)}")
             else:
-                csv_lines.append(f"{year_month},{item_id},{value:.2f}")
+                csv_lines.append(f"{year_month},{item_id},{value:.1f}")
         
         return '\n'.join(csv_lines)
     

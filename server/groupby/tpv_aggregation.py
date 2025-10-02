@@ -9,4 +9,4 @@ class TPVAggregation:
         self.transaction_count += 1
     
     def to_csv_line(self, year_half: str, store_id: str) -> str:
-        return f"{year_half},{store_id},{self.total_payment_value:.2f},{self.transaction_count}"
+        return f"{year_half},{store_id},{self.total_payment_value:.1f},{self.transaction_count}"

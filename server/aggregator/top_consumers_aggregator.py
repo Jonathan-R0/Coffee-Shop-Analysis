@@ -30,7 +30,7 @@ class TopCustomersAggregatorNode:
             logger.info(f"[INTERMEDIATE] TopK node {self.node_id}/{self.total_nodes}")
             
         elif self.mode == 'final':
-            self.total_intermediate = int(os.getenv('TOTAL_INTERMEDIATE', '2'))
+            self.total_intermediate = int(os.getenv('TOTAL_TOPK_NODES', '2'))
             self.eof_count = 0
             logger.info(f"[FINAL] Esperando {self.total_intermediate} nodos intermediate")
         else:

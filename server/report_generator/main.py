@@ -37,7 +37,7 @@ class ReportGenerator:
         
         logger.info(f"ReportGenerator inicializado:")
         logger.info(f"  Exchange: {self.report_exchange}")
-        logger.info(f"  Queries soportadas: Q1, Q3, Q4")
+        logger.info(f"  Queries soportadas: Q1, Q2,Q3, Q4")
 
     def process_message(self, message: bytes, routing_key: str):
         try:
@@ -162,9 +162,9 @@ class ReportGenerator:
             
             self.csv_files[query_name].flush()
             
-            processed_lines = len([l for l in lines if l.strip() and not any(h in l.lower() for h in ['transaction_id', 'year_half', 'store_name,birthdate','sellings_qty','profit_sum'])])
-            if processed_lines > 0:
-                logger.info(f"Escritas {processed_lines} líneas en archivo {query_name}")
+            # processed_lines = len([l for l in lines if l.strip() and not any(h in l.lower() for h in ['transaction_id', 'year_half', 'store_name,birthdate','sellings_qty','profit_sum'])])
+            # if processed_lines > 0:
+            #     logger.info(f"Escritas {processed_lines} líneas en archivo {query_name}")
             
         except Exception as e:
             logger.error(f"Error escribiendo en CSV para {query_name}: {e}")
