@@ -42,15 +42,14 @@ class JoinNode:
         self.best_selling_data: List[Dict] = []
         self.most_profit_data: List[Dict] = []
         
-        # Flags de carga
         self.stores_loaded = False
         self.users_loaded = False
         self.menu_items_loaded = False
         self.top_customers_loaded = False
 
-        self.expected_groupby_nodes = 2  # Semestre 1 y 2
-        self.top_customers_sent = False  # Para evitar múltiples envíos de Q4
-        self.q3_results_sent = False  # ← AGREGAR ESTA LÍNEA
+        self.expected_groupby_nodes = 2  
+        self.top_customers_sent = False  
+        self.q3_results_sent = False  
 
         self.best_selling_loaded = False
         self.most_profit_loaded = False
@@ -370,14 +369,14 @@ class JoinNode:
             item_id = record['item_id']
             
             if item_id in self.menu_items_data:
-                product_name = self.menu_items_data[item_id]['item_name']
+                item_name = self.menu_items_data[item_id]['item_name']
             else:
                 missing_items.add(item_id)
-                product_name = f"Item_{item_id}"
+                item_name = f"Item_{item_id}"
             
             joined_record = {
                 'year_month_created_at': record['year_month_created_at'],
-                'product_name': product_name,
+                'item_name': item_name,
                 'sellings_qty': record['sellings_qty']
             }
             
@@ -401,14 +400,14 @@ class JoinNode:
             item_id = record['item_id']
             
             if item_id in self.menu_items_data:
-                product_name = self.menu_items_data[item_id]['item_name']
+                item_name = self.menu_items_data[item_id]['item_name']
             else:
                 missing_items.add(item_id)
-                product_name = f"Item_{item_id}"
+                item_name = f"Item_{item_id}"
             
             joined_record = {
                 'year_month_created_at': record['year_month_created_at'],
-                'product_name': product_name,
+                'item_name': item_name,
                 'profit_sum': record['profit_sum']
             }
             
@@ -582,9 +581,9 @@ class JoinNode:
             
             sorted_data = sorted(joined_best_selling, key=lambda x: x['year_month_created_at'])
             
-            csv_lines = ["year_month_created_at,product_name,sellings_qty"]
+            csv_lines = ["year_month_created_at,item_name,sellings_qty"]
             for record in sorted_data:
-                csv_lines.append(f"{record['year_month_created_at']},{record['product_name']},{record['sellings_qty']}")
+                csv_lines.append(f"{record['year_month_created_at']},{record['item_name']},{record['sellings_qty']}")
             
             results_csv = '\n'.join(csv_lines)
             
@@ -607,9 +606,9 @@ class JoinNode:
             
             sorted_data = sorted(joined_most_profit, key=lambda x: x['year_month_created_at'])
             
-            csv_lines = ["year_month_created_at,product_name,profit_sum"]
+            csv_lines = ["year_month_created_at,item_name,profit_sum"]
             for record in sorted_data:
-                csv_lines.append(f"{record['year_month_created_at']},{record['product_name']},{record['profit_sum']:.2f}")
+                csv_lines.append(f"{record['year_month_created_at']},{record['item_name']},{record['profit_sum']:.2f}")
             
             results_csv = '\n'.join(csv_lines)
             
