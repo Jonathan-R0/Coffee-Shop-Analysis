@@ -92,6 +92,8 @@ class MessageMiddlewareExchange(MessageMiddleware):
                     delivery_mode=1
                 )
             )
+        except MessageMiddlewareDisconnectedError:
+            raise 
         except Exception as e:
             logger.error(f"Error enviando mensaje: {e}")
             raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")
@@ -123,6 +125,8 @@ class MessageMiddlewareExchange(MessageMiddleware):
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Conexión con RabbitMQ perdida: {e}")
             raise MessageMiddlewareDisconnectedError("Conexión con RabbitMQ perdida")
+        except MessageMiddlewareDisconnectedError:
+            raise
         except Exception as e:
             logger.error(f"Error durante el consumo de mensajes: {e}")
             raise MessageMiddlewareMessageError(f"Error durante el consumo de mensajes: {e}")
@@ -217,6 +221,8 @@ class MessageMiddlewareQueue(MessageMiddleware):
                     delivery_mode=2
                 )
             )
+        except MessageMiddlewareDisconnectedError:
+            raise 
         except Exception as e:
             logger.error(f"Error enviando mensaje: {e}")
             raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")
@@ -236,6 +242,8 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 auto_ack=False  # Manual acknowledgment for reliability
             )
             self.channel.start_consuming()
+        except MessageMiddlewareDisconnectedError:
+            raise
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Conexión con RabbitMQ perdida: {e}")
             raise MessageMiddlewareDisconnectedError("Conexión con RabbitMQ perdida")
