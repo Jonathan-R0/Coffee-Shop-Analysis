@@ -50,7 +50,7 @@ class JoinNode:
 
         self.expected_groupby_nodes = 2  # Semestre 1 y 2
         self.top_customers_sent = False  # Para evitar múltiples envíos de Q4
-        self.q3_results_sent = False  # ← AGREGAR ESTA LÍNEA
+        self.q3_results_sent = False
 
         self.best_selling_loaded = False
         self.most_profit_loaded = False
