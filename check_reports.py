@@ -151,6 +151,6 @@ q4_most_purchases_with_store_and_user = pd.merge(q4_most_purchases_with_store, u
 pd.set_option('display.max_rows', None)
 
 q4_most_purchases_with_store_and_user_filename = './reports/generated_query4.csv'
-q4_most_purchases_with_store_and_user[["store_name", "birthdate"]].to_csv(q4_most_purchases_with_store_and_user_filename, index=False, lineterminator='\n')
+q4_most_purchases_with_store_and_user[["store_name", "birthdate", "purchases_qty"]].sort_values(by=["store_name", "purchases_qty", "birthdate"]).to_csv(q4_most_purchases_with_store_and_user_filename, index=False, lineterminator='\n')
 
 remove_last_newline(q4_most_purchases_with_store_and_user_filename)
