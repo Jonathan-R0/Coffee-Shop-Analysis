@@ -1,6 +1,9 @@
 #!/bin/bash
 
 if [ $# -ne 1 ]; then
+    echo ""
+    echo "You can use this script by running: \$ configure_nodes.sh config"
+    echo ""
     echo "Usage: $0 <config_file>"
     echo ""
     echo "The config file should contain 11 lines with the following parameters:"
