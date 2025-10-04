@@ -61,6 +61,7 @@ class MessageMiddlewareExchange(MessageMiddleware):
         self.connection = None
         self.channel = None
         self.consumer_queue = None  
+        self.shutdown = None    
         
         self._connect()
 
@@ -116,12 +117,26 @@ class MessageMiddlewareExchange(MessageMiddleware):
             self.channel.basic_qos(prefetch_count=1)
             
             logger.info(f"Esperando mensajes en exchange {self.exchange_name} con routing keys {self.route_keys}...")
-            self.channel.basic_consume(
-                queue=self.consumer_queue,
-                on_message_callback=self._wrap_callback(on_message_callback),
-                auto_ack=False 
-            )
-            self.channel.start_consuming()
+            
+            for method_frame, properties, body in self.channel.consume(
+                self.consumer_queue,
+                auto_ack=False,
+                inactivity_timeout=5  
+            ):
+                if self.shutdown and self.shutdown.is_shutting_down():
+                    logger.info("Shutdown detectado en exchange middleware, dejando de consumir")
+                    break
+                
+                if method_frame is None:
+                    continue
+                
+                try:
+                    on_message_callback(self.channel, method_frame, properties, body)
+                    self.channel.basic_ack(method_frame.delivery_tag)
+                except Exception as e:
+                    logger.error(f"Error en callback: {e}")
+                    self.channel.basic_nack(method_frame.delivery_tag, requeue=True)
+                    
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Conexión con RabbitMQ perdida: {e}")
             raise MessageMiddlewareDisconnectedError("Conexión con RabbitMQ perdida")
@@ -130,6 +145,9 @@ class MessageMiddlewareExchange(MessageMiddleware):
         except Exception as e:
             logger.error(f"Error durante el consumo de mensajes: {e}")
             raise MessageMiddlewareMessageError(f"Error durante el consumo de mensajes: {e}")
+        finally:
+            logger.info("Finalizando consumo en exchange...")
+            self.stop_consuming()    
     
     def _wrap_callback(self, user_callback):
         def wrapper(ch, method, properties, body):
@@ -177,6 +195,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
         self.routing_keys = routing_keys or []
         self.connection = None
         self.channel = None
+        self.shutdown = None
 
         self._connect()
 
@@ -235,12 +254,26 @@ class MessageMiddlewareQueue(MessageMiddleware):
             # Optimizado para throughput
             self.channel.basic_qos(prefetch_count=10)
             
-            logger.info(f"Esperando mensajes en la cola {self.queue_name}...")
-            self.channel.basic_consume(
-                queue=self.queue_name,
-                on_message_callback=self._wrap_callback(on_message_callback),
-                auto_ack=False  # Manual acknowledgment for reliability
-            )
+            for method_frame, properties, body in self.channel.consume(
+                self.queue_name,
+                auto_ack=False,
+                inactivity_timeout=5
+            ):
+            
+                if self.shutdown and self.shutdown.is_shutting_down():
+                    logger.info("Shutdown detectado en middleware, dejando de consumir")
+                    break
+                
+                if method_frame is None:
+                    continue
+                
+                try:
+                    on_message_callback(self.channel, method_frame, properties, body)
+                    self.channel.basic_ack(method_frame.delivery_tag)
+                except Exception as e:
+                    logger.error(f"Error en callback: {e}")
+                    self.channel.basic_nack(method_frame.delivery_tag, requeue=True)
+                    
             self.channel.start_consuming()
         except MessageMiddlewareDisconnectedError:
             raise
@@ -250,7 +283,10 @@ class MessageMiddlewareQueue(MessageMiddleware):
         except Exception as e:
             logger.error(f"Error durante el consumo de mensajes: {e}")
             raise MessageMiddlewareMessageError(f"Error durante el consumo de mensajes: {e}")
-    
+        finally:
+            logger.info("Finalizando consumo...")
+            self.stop_consuming()
+            
     def _wrap_callback(self, user_callback):
         def wrapper(ch, method, properties, body):
             try:

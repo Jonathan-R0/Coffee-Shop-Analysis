@@ -23,7 +23,7 @@ docker-compose-up: docker-image
 .PHONY: docker-compose-up
 
 docker-compose-down:
-	docker compose -f docker-compose.yaml stop -t 1
+	docker compose -f docker-compose.yaml stop -t 30
 	docker compose -f docker-compose.yaml down -v
 	docker images --format "{{.Repository}}:{{.Tag}}" | grep -v "python" | xargs -r docker rmi -f || true
 	docker container prune -f

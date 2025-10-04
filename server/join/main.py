@@ -1,8 +1,10 @@
 import logging
 import os
+import sys
 from typing import Dict, List
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 from dtos.dto import TransactionBatchDTO, StoreBatchDTO, UserBatchDTO, MenuItemBatchDTO, TransactionItemBatchDTO, BatchType
+from common.graceful_shutdown import GracefulShutdown
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -10,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 class JoinNode:
     def __init__(self):
+        self.shutdown = GracefulShutdown()
+        self.shutdown.register_callback(self._on_shutdown_signal)
+        
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         
         self.input_exchange = os.getenv('INPUT_EXCHANGE', 'join.exchange')
@@ -25,6 +30,9 @@ class JoinNode:
                        'menu_items.data',
                        'q2_best_selling.data', 'q2_most_profit.data']
         )
+        if hasattr(self.input_middleware, 'shutdown'):
+            self.input_middleware.shutdown = self.shutdown
+            
         self.output_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.output_exchange,
@@ -33,6 +41,9 @@ class JoinNode:
                        'q2_most_profit.data']
         )
         
+        if hasattr(self.output_middleware, 'shutdown'):
+            self.output_middleware.shutdown = self.shutdown
+            
         self.stores_data: Dict[str, Dict] = {}
         self.users_data: Dict[str, Dict] = {}
         self.tpv_data: List[Dict] = []
@@ -71,6 +82,11 @@ class JoinNode:
         logger.info(f"  Exchange: {self.input_exchange}")
         logger.info(f"  Routing keys: stores, users, menu_items, tpv, top_customers, q2_best_selling, q2_most_profit")
     
+    def _on_shutdown_signal(self):
+        logger.info("Señal de shutdown recibida en JoinNode")
+        if self.input_middleware:
+            self.input_middleware.stop_consuming()
+            
     def _process_store_batch(self, csv_data: str):
         processed_count = 0
         
@@ -625,6 +641,10 @@ class JoinNode:
             logger.error(f"Error enviando resultados Q2 most_profit: {e}")
     
     def process_message(self, message: bytes, routing_key: str) -> bool:
+        if self.shutdown.is_shutting_down():
+            logger.warning("Shutdown en progreso, ignorando mensaje")
+            return True
+        
         try:
             if routing_key == 'stores.data':
                 dto = StoreBatchDTO.from_bytes_fast(message)
@@ -684,6 +704,11 @@ class JoinNode:
     
     def on_message_callback(self, ch, method, properties, body):
         try:
+            if self.shutdown.is_shutting_down():
+                logger.warning("Shutdown solicitado, deteniendo")
+                ch.stop_consuming()
+                return
+            
             routing_key = method.routing_key
             should_stop = self.process_message(body, routing_key)
             if should_stop:
@@ -720,5 +745,11 @@ class JoinNode:
 
 
 if __name__ == "__main__":
-    node = JoinNode()
-    node.start()
+    try:
+        node = JoinNode()
+        node.start()
+        logger.info("JoinNode terminado exitosamente")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Error fatal: {e}")
+        sys.exit(1) 

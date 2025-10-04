@@ -1,14 +1,19 @@
 import logging
 import os
 from datetime import datetime
+import sys
 from rabbitmq.middleware import MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO, BatchType, ReportBatchDTO
+from common.graceful_shutdown import GracefulShutdown
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ReportGenerator:
     def __init__(self):
+        self.shutdown = GracefulShutdown()
+        self.shutdown.register_callback(self._on_shutdown_signal)
+        
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.report_exchange = os.getenv('REPORT_EXCHANGE', 'report.exchange')
         self.reports_exchange = os.getenv('REPORTS_EXCHANGE', 'reports_exchange')
@@ -19,11 +24,19 @@ class ReportGenerator:
 
             route_keys=['q1.data', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof','q2_most_profit.data','q2_best_selling.data']
         )
+        
+        if hasattr(self.input_middleware, 'shutdown'):
+            self.input_middleware.shutdown = self.shutdown
+            
         self.publisher = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
                 exchange_name=self.reports_exchange,
                 route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof','q2_most_profit.data','q2_best_selling.data']
         )
+        
+        if hasattr(self.publisher, 'shutdown'):
+            self.publisher.shutdown = self.shutdown
+            
         self.expected_queries = {'q1'
                                  ,'q3'
                                  ,'q4'
@@ -38,8 +51,17 @@ class ReportGenerator:
         logger.info(f"ReportGenerator inicializado:")
         logger.info(f"  Exchange: {self.report_exchange}")
         logger.info(f"  Queries soportadas: Q1, Q2,Q3, Q4")
-
+ 
+    def _on_shutdown_signal(self):
+        logger.info("Señal de shutdown recibida en ReportGenerator")
+        if self.input_middleware:
+            self.input_middleware.stop_consuming()
+  
     def process_message(self, message: bytes, routing_key: str):
+        if self.shutdown.is_shutting_down():
+            logger.warning("Shutdown en progreso, ignorando mensaje")
+            return True
+        
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
             
@@ -87,6 +109,11 @@ class ReportGenerator:
             return False
 
     def on_message_callback(self, ch, method, properties, body):
+        if self.shutdown.is_shutting_down():
+            logger.warning("Shutdown solicitado, deteniendo")
+            ch.stop_consuming()
+            return
+
         try:
             routing_key = method.routing_key  
             should_stop = self.process_message(body, routing_key)  
@@ -215,5 +242,11 @@ class ReportGenerator:
             logger.error(f"Error publicando reportes: {e}")
 
 if __name__ == "__main__":
-    report_generator = ReportGenerator()
-    report_generator.start()
+    try:
+        report_generator = ReportGenerator()
+        report_generator.start()
+        logger.info("ReportGenerator terminado exitosamente")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Error fatal: {e}")
+        sys.exit(1)

@@ -1,9 +1,11 @@
 import logging
 import os
+import sys
 from typing import Dict, Tuple
 from collections import defaultdict
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 from dtos.dto import TransactionItemBatchDTO, BatchType
+from common.graceful_shutdown import GracefulShutdown 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,6 +28,9 @@ class ItemMetrics:
 
 class BestSellingAggregatorNode:
     def __init__(self):
+        self.shutdown = GracefulShutdown()
+        self.shutdown.register_callback(self._on_shutdown_signal)
+        
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.mode = os.getenv('AGGREGATOR_MODE', 'intermediate')
         
@@ -64,10 +69,20 @@ class BestSellingAggregatorNode:
         try:
             self._setup_input_middleware()
             self._setup_output_middleware()
+            
+            if hasattr(self.input_middleware, 'shutdown'):
+                self.input_middleware.shutdown = self.shutdown
+            if hasattr(self.output_middleware, 'shutdown'):
+                self.output_middleware.shutdown = self.shutdown
+            
         except Exception as e:
             logger.error(f"Error durante la configuración de middlewares: {e}")
             raise
-    
+    def _on_shutdown_signal(self):
+        logger.info("Señal de shutdown recibida en BestSellingAggregator")
+        if self.input_middleware:
+            self.input_middleware.stop_consuming()
+                
     def _setup_input_middleware(self):
         if self.mode == 'intermediate':
             input_exchange = os.getenv('INPUT_EXCHANGE', 'best_selling.exchange')
@@ -324,6 +339,10 @@ class BestSellingAggregatorNode:
     
     def process_message(self, message: bytes, routing_key: str = None) -> bool:
         try:
+            if self.shutdown.is_shutting_down():
+                logger.warning("Shutdown en progreso, ignorando mensaje")
+                return True
+            
             dto = TransactionItemBatchDTO.from_bytes_fast(message)
             
             if dto.batch_type == BatchType.EOF:
@@ -342,6 +361,11 @@ class BestSellingAggregatorNode:
     
     def on_message_callback(self, ch, method, properties, body):
         try:
+            if self.shutdown.is_shutting_down():
+                logger.warning("Shutdown solicitado, deteniendo")
+                ch.stop_consuming()
+                return
+            
             routing_key = getattr(method, 'routing_key', None)
             should_stop = self.process_message(body, routing_key)
             if should_stop:
@@ -380,5 +404,11 @@ class BestSellingAggregatorNode:
 
 
 if __name__ == "__main__":
-    aggregator = BestSellingAggregatorNode()
-    aggregator.start()
+    try:
+        aggregator = BestSellingAggregatorNode()
+        aggregator.start()
+        logger.info("BestSellingAggregator terminado exitosamente")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Error fatal: {e}")
+        sys.exit(1)

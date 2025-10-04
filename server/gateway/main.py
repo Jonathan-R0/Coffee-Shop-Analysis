@@ -10,10 +10,10 @@ from rabbitmq.middleware import MessageMiddlewareQueue
 from dataclasses import asdict 
 from logger import get_logger
 from gateway import Gateway
+from common.graceful_shutdown import GracefulShutdown
 
 logger = get_logger(__name__)
 
-gateway = None
 
 def initialize_config():
     config = ConfigParser(os.environ)
@@ -35,34 +35,42 @@ def initialize_config():
 
     return config_params
 
-def signal_handler(sig, frame):
-    logger.info('action: graceful_shutdown | result: success | signal: SIGTERM')
-    if gateway:
-        gateway.shutdown()
-
 def main():
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    config = initialize_config()
-    port = config["port"]
-    listener_backlog = config["listener_backlog"]
-    rabbitmq_host = config["rabbitmq_host"]
-    output_queue = config["output_queue"]
-    join_exchange = config["join_exchange"]
-    reports_exchange = config["reports_exchange"]
-    output_exchange = config["output_exchange"]
-    gateway = Gateway(
-        port, 
-        listener_backlog, 
-        rabbitmq_host, 
-        output_queue, 
-        join_exchange,    
-        output_exchange,
-        reports_exchange   
-    )
-    gateway.start()
-
+    shutdown_handler = GracefulShutdown()
+    try:
+        config = initialize_config()
+        port = config["port"]
+        listener_backlog = config["listener_backlog"]
+        rabbitmq_host = config["rabbitmq_host"]
+        output_queue = config["output_queue"]
+        join_exchange = config["join_exchange"]
+        reports_exchange = config["reports_exchange"]
+        output_exchange = config["output_exchange"]
+    
+        gateway_instance = Gateway(
+                    port, 
+                    listener_backlog, 
+                    rabbitmq_host, 
+                    output_queue, 
+                    join_exchange,    
+                    output_exchange,
+                    reports_exchange,
+                    shutdown_handler 
+                )
+                    
+        logger.info("Iniciando Gateway...")
+        gateway_instance.start()
+        
+        logger.info("Gateway terminado exitosamente")
+        sys.exit(0) 
+        
+    except KeyboardInterrupt:
+        logger.info("Gateway detenido manualmente (Ctrl+C)")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Error fatal en Gateway: {e}")
+        sys.exit(1)
+        
 if __name__ == "__main__":
     main()

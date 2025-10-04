@@ -5,8 +5,8 @@ WORKDIR /app
 COPY requirements.txt .
 COPY ./server/gateway/ .
 COPY ./rabbitmq/ ./rabbitmq/
-COPY ../common /app/common 
-COPY ../common/entities /app/entities 
+COPY common/ /app/common/
+COPY common/entities /app/entities
 COPY ./server/dtos/ ./dtos/
 
 RUN pip install --no-cache-dir -r requirements.txt

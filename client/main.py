@@ -50,16 +50,25 @@ def initialize_log(logging_level):
     
     
 def main():
-    config_params = initialize_config()
-    logging_level = config_params["logging_level"]
-    server_port = config_params["port"]
-    max_batch_size = config_params["max_batch_size"]
+    try:
+        config_params = initialize_config()
+        logging_level = config_params["logging_level"]
+        server_port = config_params["port"]
+        max_batch_size = config_params["max_batch_size"]
 
-    initialize_log(logging_level)
+        initialize_log(logging_level)
 
-    #signal.signal(signal.SIGTERM, signal_handler) GRACEFUL SHUTDOWN
-    client = Client(server_port, max_batch_size)
-    client.run()
-    
+        #signal.signal(signal.SIGTERM, signal_handler) GRACEFUL SHUTDOWN
+        client = Client(server_port, max_batch_size)
+        client.run()
+        sys.exit(0) 
+        
+    except KeyboardInterrupt:
+        logging.info("Client detenido manualmente (Ctrl+C)")
+        sys.exit(0)
+    except Exception as e:
+        logging.error(f"Error fatal en Client: {e}")
+        sys.exit(1) 
+        
 if __name__ == "__main__":
     main()

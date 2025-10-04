@@ -1,8 +1,10 @@
 import logging
 import os
+import sys
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType
 from groupby_strategy import GroupByStrategyFactory
+from common.graceful_shutdown import GracefulShutdown
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -10,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 class GroupByNode:
     def __init__(self):
+        self.shutdown = GracefulShutdown()
+        self.shutdown.register_callback(self._on_shutdown_signal)
+
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.groupby_mode = os.getenv('GROUPBY_MODE', 'tpv')
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'join.exchange')
@@ -18,16 +23,28 @@ class GroupByNode:
         
         self._setup_input_middleware()
         
+        if hasattr(self.input_middleware, 'shutdown'):
+            self.input_middleware.shutdown = self.shutdown
+        
         self.output_middlewares = self.groupby_strategy.setup_output_middleware(
             self.rabbitmq_host,
             self.output_exchange
         )
         
+        for name, middleware in self.output_middlewares.items():
+            if middleware and hasattr(middleware, 'shutdown'):
+                middleware.shutdown = self.shutdown
+        
         if self.groupby_mode in ['top_customers', 'best_selling']:
             self.output_middlewares['input_queue'] = self.input_middleware
         
         logger.info(f"GroupByNode inicializado en modo {self.groupby_mode}")
-    
+   
+    def _on_shutdown_signal(self):
+        logger.info("Señal de shutdown recibida en GroupByNode")
+        if self.input_middleware:
+            self.input_middleware.stop_consuming()
+                
     def _setup_input_middleware(self):
         if self.groupby_mode == 'tpv':
             self.input_exchange = os.getenv('INPUT_EXCHANGE', 'groupby.join.exchange')
@@ -82,6 +99,10 @@ class GroupByNode:
         return GroupByStrategyFactory.create_strategy(self.groupby_mode, **config)
     
     def process_message(self, message: bytes) -> bool:
+        if self.shutdown.is_shutting_down():
+            logger.warning("Shutdown en progreso, ignorando mensaje")
+            return True
+        
         try:
             if self.groupby_mode == 'best_selling':
                 dto = TransactionItemBatchDTO.from_bytes_fast(message)
@@ -104,6 +125,11 @@ class GroupByNode:
     
     def on_message_callback(self, ch, method, properties, body):
         try:
+            if self.shutdown.is_shutting_down():
+                logger.warning("Shutdown solicitado, deteniendo")
+                ch.stop_consuming()
+                return
+            
             should_stop = self.process_message(body)
             if should_stop:
                 logger.info("EOF procesado - deteniendo consuming")
@@ -133,5 +159,11 @@ class GroupByNode:
 
 
 if __name__ == "__main__":
-    node = GroupByNode()
-    node.start()
+    try:
+        node = GroupByNode()
+        node.start()
+        logger.info("GroupByNode terminado exitosamente")
+        sys.exit(0)  
+    except Exception as e:
+        logger.error(f"Error fatal: {e}")
+        sys.exit(1)

@@ -4,11 +4,15 @@ import logging
 from common.processor import TransactionCSVProcessor
 from common.protocol import Protocol
 from common.new_protocolo import ProtocolNew
+from common.graceful_shutdown import GracefulShutdown  
 
 logger = logging.getLogger(__name__)
 
 class Client:
     def __init__(self, server_port, max_batch_size):
+        self.shutdown = GracefulShutdown()
+        self.shutdown.register_callback(self._on_shutdown_signal)
+        
         self.server_port = server_port
         self.max_batch_size = int(max_batch_size)
         self.keep_running = False
@@ -16,10 +20,23 @@ class Client:
         self.protocol = None  
         self.processor = None
         self.expected_reports = 5
-    
+
+    def _on_shutdown_signal(self):
+        logger.info("Señal de shutdown recibida en Client")
+        self.keep_running = False
+        if self.client_socket:
+            try:
+                self.client_socket.close()
+            except:
+                pass
+                
     def run(self):
         self.keep_running = True
         try:
+            if self.shutdown.is_shutting_down():
+                logger.info("Shutdown detectado, no conectando")
+                return
+            
             logger.info(f"Conectando al servidor en el puerto {self.server_port}")
             self.client_socket = socket.create_connection(('gateway', self.server_port))
             
@@ -48,11 +65,14 @@ class Client:
         }
 
         try:
-            for file_type, folder_path in mounted_folders.items():
+            for file_type, folder_path in mounted_folders.items():                
+                if self.shutdown.is_shutting_down():
+                    logger.info("Shutdown detectado, deteniendo envío de archivos")
+                    break
+                
                 if not os.path.exists(folder_path):
                     logging.warning(f"La carpeta {folder_path} no existe. Saltando...")
                     continue
-
                 files = [f for f in os.listdir(folder_path) if f.endswith(".csv")]
                 if not files:
                     logging.info(f"No se encontraron archivos en {folder_path}.")
@@ -61,11 +81,17 @@ class Client:
                 logging.info(f"Procesando archivos en {folder_path}: {files}")
 
                 for file in files:
+                    if self.shutdown.is_shutting_down():
+                        logger.info("Shutdown detectado durante procesamiento")
+                        break
+                    
                     file_path = os.path.join(folder_path, file)
                     self.send_data(file_path, file_type)
-                self.protocol.send_finish_message(file_type)
-            
-            if self.protocol:
+                
+                if not self.shutdown.is_shutting_down():
+                    self.protocol.send_finish_message(file_type)
+                                
+            if self.protocol and not self.shutdown.is_shutting_down():
                 self.protocol.send_exit_message()
                 self.receive_reports()
 
@@ -80,6 +106,10 @@ class Client:
             self.processor = TransactionCSVProcessor(csv_filepath, self.max_batch_size)
             
             while self.processor.has_more_batches() and self.keep_running:
+                if self.shutdown.is_shutting_down():
+                    logger.info("Shutdown detectado, deteniendo envío de batches")
+                    break
+                
                 batch_result = self.processor.read_next_batch()
                 
                 if not batch_result.items:
@@ -112,6 +142,10 @@ class Client:
             reports_received = 0
             
             while self.keep_running and reports_received < self.expected_reports:
+                if self.shutdown.is_shutting_down():
+                    logger.info("Shutdown detectado, deteniendo recepción de reportes")
+                    break
+                
                 logger.info(f"Esperando reporte {reports_received + 1} de {self.expected_reports}...")
                 
                 report = self.protocol.receive_report()  # ← Retorna dict

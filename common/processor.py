@@ -54,7 +54,7 @@ class TransactionCSVProcessor:
         
         
         self.count += 1
-        logger.info(f"Batch numero: {self.count} ")
+        # logger.info(f"Batch numero: {self.count} ")
         return BatchResult(items=items, is_eof=self.is_eof)
     
     def close(self):

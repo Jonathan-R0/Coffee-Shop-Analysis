@@ -1,9 +1,11 @@
 import logging
 import os
+import sys
 from rabbitmq.middleware import MessageMiddlewareQueue
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType
+from common.graceful_shutdown import GracefulShutdown  
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -11,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 class FilterNode:
     def __init__(self):
+        self.shutdown = GracefulShutdown()
+        self.shutdown.register_callback(self._on_shutdown_signal)
+        
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.input_queue = os.getenv('INPUT_QUEUE', None)
         self.output_q1 = os.getenv('OUTPUT_Q1', None)
@@ -44,6 +49,8 @@ class FilterNode:
                 self.input_queue, ""
             )
         
+        if hasattr(self.input_middleware, 'shutdown'):
+            self.input_middleware.shutdown = self.shutdown
         
         self.middlewares = self.node_configurator.create_output_middlewares(
             self.output_q1,
@@ -51,7 +58,20 @@ class FilterNode:
             self.output_q4,
             self.output_q2
         )
+        
+        for name, middleware in self.middlewares.items():
+            if middleware and hasattr(middleware, 'shutdown'):
+                middleware.shutdown = self.shutdown
 
+    def _on_shutdown_signal(self):
+        """Callback ejecutado cuando se recibe señal de shutdown"""
+        logger.info("FilterNode: Señal de shutdown recibida, deteniendo consumo...")
+        try:
+            if self.input_middleware:
+                self.input_middleware.stop_consuming()
+        except Exception as e:
+            logger.error(f"Error deteniendo consumo: {e}")
+            
     def _create_filter_strategy(self):
         try:
             config = {}
@@ -72,6 +92,10 @@ class FilterNode:
 
 
     def process_message(self, body: bytes, routing_key: str = None):
+        if self.shutdown.is_shutting_down():
+            logger.warning("Shutdown en progreso, ignorando mensaje")
+            return True
+        
         try:
             should_stop, batch_type, dto, is_eof = self.node_configurator.process_message(
                 body, routing_key
@@ -98,6 +122,10 @@ class FilterNode:
             if not filtered_csv.strip():
                 return False
             
+            if self.shutdown.is_shutting_down():
+                logger.warning("Shutdown en progreso, no se enviarán datos")
+                return True
+                        
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type)
             
@@ -138,6 +166,11 @@ class FilterNode:
         
     def on_message_callback(self, ch, method, properties, body):
         try:
+            if self.shutdown.is_shutting_down():
+                logger.warning("Shutdown solicitado, deteniendo consumo")
+                ch.stop_consuming()
+                return
+            
             routing_key = method.routing_key if hasattr(method, 'routing_key') else None
             should_stop = self.process_message(body, routing_key)
             
@@ -161,20 +194,36 @@ class FilterNode:
             self._cleanup()
 
     def _cleanup(self):
+        """Limpieza ordenada de recursos"""
+        logger.info("Iniciando cleanup del FilterNode...")
+        
         try:
+            # Cerrar middleware de entrada
             if self.input_middleware:
                 self.input_middleware.close()
-                logger.info("Conexión de entrada cerrada")
+                logger.info("Middleware de entrada cerrado")
             
+            # Cerrar todos los middlewares de salida
             for name, middleware in self.middlewares.items():
                 if middleware:
-                    middleware.close()
-                    logger.info(f"Middleware {name} cerrado")
+                    try:
+                        middleware.close()
+                        logger.info(f"Middleware '{name}' cerrado")
+                    except Exception as e:
+                        logger.error(f"Error cerrando middleware '{name}': {e}")
                 
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
 
+        logger.info("Cleanup completado")
+
 
 if __name__ == "__main__":
-    filter_node = FilterNode()
-    filter_node.start()
+    try:
+        filter_node = FilterNode()
+        filter_node.start()
+        logger.info("FilterNode terminado exitosamente")
+        sys.exit(0)     
+    except Exception as e:
+        logger.error(f"Error fatal: {e}")
+        sys.exit(1)

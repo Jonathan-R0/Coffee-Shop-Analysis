@@ -15,10 +15,13 @@ logger = get_logger(__name__)
 
 class Gateway:
 
-    def __init__(self, port, listener_backlog, rabbitmq_host, output_queue, store_exchange, output_exchange, reports_exchange=None):
+    def __init__(self, port, listener_backlog, rabbitmq_host, output_queue, store_exchange, output_exchange, reports_exchange=None, shutdown_handler=None):
+        self.shutdown = shutdown_handler
+        
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listener_backlog)
+
         self._is_running = False
         self.max_expected_reports = 5
         self.reports_config = [
@@ -28,11 +31,15 @@ class Gateway:
             ('q2_most_profit', self._convert_q2_most_profit_to_csv, "Q2_MOST_PROFIT", "items"),
             ('q2_best_selling', self._convert_q2_best_selling_to_csv, "Q2_BEST_SELLING", "items")
         ]
+        
         self._middleware = MessageMiddlewareExchange(
             host=rabbitmq_host,
             exchange_name=output_exchange,  
             route_keys=['transactions', 'transaction_items']
         )
+
+        if self.shutdown and hasattr(self._middleware, 'shutdown'):
+            self._middleware.shutdown = self.shutdown        
 
         self._reports_exchange = reports_exchange
         self._join_middleware = MessageMiddlewareExchange(
@@ -41,6 +48,9 @@ class Gateway:
             route_keys=['stores.data','users.data','users.eof', 'menu_items.data']
         )
         
+        if self.shutdown and hasattr(self._join_middleware, 'shutdown'):
+            self._join_middleware.shutdown = self.shutdown
+            
         self.report_middleware = MessageMiddlewareExchange(
             host=rabbitmq_host,
             exchange_name=self._reports_exchange,
@@ -55,7 +65,10 @@ class Gateway:
         try:
             for message in protocol.receive_messages():
                 # logger.info(f"Received message: {message.action} {message.file_type}, size: {message.size}, last_batch: {message.last_batch}")
-
+                if self.shutdown and self.shutdown.is_shutting_down():
+                    logger.info("Shutdown detectado, cerrando conexión con cliente")
+                    break
+                
                 if message.action == "EXIT":
                     logger.info(f"EXIT received")
                     self._wait_and_send_report(protocol)
@@ -89,6 +102,11 @@ class Gateway:
             
     def _handle_finish(self, file_type: str):
         """Maneja el mensaje FINISH enviando EOF al pipeline correspondiente."""
+        
+        if self.shutdown and self.shutdown.is_shutting_down():
+            logger.info("Shutdown activo, no enviando EOF")
+            return
+               
         try:
             if file_type == "D":
                 eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
@@ -184,6 +202,10 @@ class Gateway:
 
 
     def _wait_and_send_report(self, protocol):
+        if self.shutdown and self.shutdown.is_shutting_down():
+            logger.info("Shutdown activo, no esperando reportes")
+            return
+        
         try:
             logger.info("Esperando reportes del pipeline...")
             
@@ -209,7 +231,12 @@ class Gateway:
         
         def report_callback(ch, method, properties, body):
             nonlocal eof_count
-            
+           
+            if self.shutdown and self.shutdown.is_shutting_down():
+                logger.info("Shutdown detectado, deteniendo recepción de reportes")
+                ch.stop_consuming()
+                return    
+                    
             try:
                 dto = ReportBatchDTO.from_bytes_fast(body)
                 routing_key = method.routing_key
@@ -279,7 +306,11 @@ class Gateway:
 
         for query_key, converter_func, report_name, unit_name in self.reports_config:
             transactions = report_data[query_key]
-            
+          
+            if self.shutdown and self.shutdown.is_shutting_down():
+                logger.info("Shutdown detectado, deteniendo envío de reportes")
+                break
+              
             if transactions:
                 csv_content = converter_func(transactions)
                 self._send_report_via_protocol(protocol, csv_content, report_name)
@@ -366,12 +397,51 @@ class Gateway:
         self._is_running = True
         try:
             while self._is_running:
-                client_sock = self.__accept_new_connection()
-                self.handle_connection(client_sock)
+                if self.shutdown and self.shutdown.is_shutting_down():
+                    logger.info("Shutdown detectado, cerrando gateway")
+                    break
+                
+                try:
+                    client_sock = self.__accept_new_connection()
+                    self.handle_connection(client_sock)
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    if self._is_running:
+                        logger.error(f"Error aceptando conexión: {e}")
+                    break
+                
         except KeyboardInterrupt:
             logger.info("Servidor detenido manualmente")
         finally:
-            self.shutdown(None, None)
+            self._cleanup() 
+            
+    def _cleanup(self):
+        """Limpieza de recursos"""
+        logger.info("Iniciando cleanup del Gateway...")
+        self._is_running = False
+        
+        try:
+            if self._server_socket:
+                self._server_socket.close()
+                logger.info("Socket del servidor cerrado")
+            
+            if self._middleware:
+                self._middleware.close()
+                logger.info("Conexión principal con RabbitMQ cerrada")
+            
+            if self._join_middleware:
+                self._join_middleware.close()
+                logger.info("Join middleware cerrado")
+            
+            if hasattr(self, 'report_middleware') and self.report_middleware:
+                self.report_middleware.close()
+                logger.info("Report middleware cerrado")
+                
+        except Exception as e:
+            logger.error(f"Error durante cleanup: {e}")
+        
+        logger.info("Gateway cerrado completamente")
             
     def __accept_new_connection(self):
 
@@ -380,18 +450,3 @@ class Gateway:
         logger.info(f'Accepted new connection from {addr[0]}')
         return c
 
-
-    def shutdown(self, signal_received, frame):
-        logger.info("Recibiendo señal de terminación. Cerrando servidor...")
-        self._is_running = False
-        if self._server_socket:
-            self._server_socket.close()
-            logger.info("Socket del servidor cerrado.")
-        if self._middleware:
-            self._middleware.close()
-            logger.info("Conexión con RabbitMQ cerrada.")
-        if self._join_middleware:
-            self._join_middleware.close()
-            logger.info("Conexión con RabbitMQ cerrada.")
-        logger.info("Servidor detenido correctamente.")
-        sys.exit(0)
