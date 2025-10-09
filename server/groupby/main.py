@@ -98,24 +98,35 @@ class GroupByNode:
         
         return GroupByStrategyFactory.create_strategy(self.groupby_mode, **config)
     
-    def process_message(self, message: bytes) -> bool:
+    def process_message(self, message: bytes, properties) -> bool:
         if self.shutdown.is_shutting_down():
             logger.warning("Shutdown en progreso, ignorando mensaje")
             return True
         
         try:
+            headers = getattr(properties, 'headers', {}) or {}
+            client_id = headers.get('client_id')
+            if client_id is None:
+                logger.warning("Mensaje recibido sin client_id en headers, descartando")
+                return False
+            try:
+                client_id = int(client_id)
+            except (TypeError, ValueError):
+                logger.warning(f"client_id inválido en headers: {client_id}")
+                return False
+
             if self.groupby_mode == 'best_selling':
                 dto = TransactionItemBatchDTO.from_bytes_fast(message)
             else:
                 dto = TransactionBatchDTO.from_bytes_fast(message)
             logger.info(f"Mensaje recibido: batch_type={dto.batch_type}, tamaño={len(dto.data)} bytes")
             if dto.batch_type == BatchType.EOF:
-                return self.groupby_strategy.handle_eof_message(dto, self.output_middlewares)
+                return self.groupby_strategy.handle_eof_message(dto, self.output_middlewares, client_id)
             
             if dto.batch_type == BatchType.RAW_CSV:
                 for line in dto.data.split('\n'):
                     if line.strip():
-                        self.groupby_strategy.process_csv_line(line.strip())
+                        self.groupby_strategy.process_csv_line(line.strip(), client_id)
             
             return False
             
@@ -130,7 +141,7 @@ class GroupByNode:
                 ch.stop_consuming()
                 return
             
-            should_stop = self.process_message(body)
+            should_stop = self.process_message(body, properties)
             if should_stop:
                 logger.info("EOF procesado - deteniendo consuming")
                 ch.stop_consuming()

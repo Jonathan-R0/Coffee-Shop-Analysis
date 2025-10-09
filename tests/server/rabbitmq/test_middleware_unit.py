@@ -82,6 +82,19 @@ class TestMessageMiddlewareQueue(unittest.TestCase):
         )
 
     @patch('rabbitmq.middleware.pika.BlockingConnection')
+    def test_send_message_with_headers(self, mock_blocking_connection):
+        """Test sending message with custom headers"""
+        mock_blocking_connection.return_value = self.mock_connection
+        middleware = MessageMiddlewareQueue(self.host, self.queue_name)
+
+        headers = {"client_id": 42, "trace_id": "abc"}
+        middleware.send("payload", headers=headers)
+
+        args, kwargs = self.mock_channel.basic_publish.call_args
+        properties = kwargs["properties"]
+        self.assertEqual(properties.headers, headers)
+
+    @patch('rabbitmq.middleware.pika.BlockingConnection')
     def test_send_message_no_connection(self, mock_blocking_connection):
         """Test sending message when there's no active connection"""
         mock_blocking_connection.return_value = self.mock_connection
@@ -237,6 +250,30 @@ class TestMessageMiddlewareQueue(unittest.TestCase):
         user_callback.assert_called_once_with(mock_ch, mock_method, mock_properties, mock_body)
         mock_ch.basic_nack.assert_called_once_with(delivery_tag="test_tag", requeue=True)
 
+    @patch('rabbitmq.middleware.pika.BlockingConnection')
+    def test_callback_wrapper_honours_shutdown(self, mock_blocking_connection):
+        """Callback wrapper should stop consuming when shutdown is requested"""
+        mock_blocking_connection.return_value = self.mock_connection
+        middleware = MessageMiddlewareQueue(self.host, self.queue_name)
+
+        shutdown_mock = Mock()
+        shutdown_mock.is_shutting_down.return_value = True
+        middleware.shutdown = shutdown_mock
+
+        user_callback = Mock()
+        wrapped_callback = middleware._wrap_callback(user_callback)
+
+        mock_ch = Mock()
+        mock_method = Mock()
+        mock_method.delivery_tag = "tag_shutdown"
+
+        wrapped_callback(mock_ch, mock_method, Mock(), b"body")
+
+        shutdown_mock.is_shutting_down.assert_called_once()
+        user_callback.assert_not_called()
+        mock_ch.basic_ack.assert_called_once_with(delivery_tag="tag_shutdown")
+        mock_ch.stop_consuming.assert_called_once()
+
 
 class TestMessageMiddlewareExchange(unittest.TestCase):
     """Test suite for MessageMiddlewareExchange class"""
@@ -305,6 +342,19 @@ class TestMessageMiddlewareExchange(unittest.TestCase):
             body=test_message,
             properties=unittest.mock.ANY
         )
+
+    @patch('rabbitmq.middleware.pika.BlockingConnection')
+    def test_send_message_with_headers(self, mock_blocking_connection):
+        """Test sending message with headers"""
+        mock_blocking_connection.return_value = self.mock_connection
+        middleware = MessageMiddlewareExchange(self.host, self.exchange_name, self.route_keys)
+
+        headers = {"client_id": 99, "pipeline": "groupby"}
+        middleware.send("payload", routing_key="key1", headers=headers)
+
+        args, kwargs = self.mock_channel.basic_publish.call_args
+        properties = kwargs["properties"]
+        self.assertEqual(properties.headers, headers)
 
     @patch('rabbitmq.middleware.pika.BlockingConnection')
     def test_send_message_default_routing_key(self, mock_blocking_connection):
@@ -496,6 +546,30 @@ class TestMessageMiddlewareExchange(unittest.TestCase):
         
         user_callback.assert_called_once_with(mock_ch, mock_method, mock_properties, mock_body)
         mock_ch.basic_nack.assert_called_once_with(delivery_tag="test_tag", requeue=True)
+
+    @patch('rabbitmq.middleware.pika.BlockingConnection')
+    def test_callback_wrapper_honours_shutdown(self, mock_blocking_connection):
+        """Exchange callback should respect shutdown flag"""
+        mock_blocking_connection.return_value = self.mock_connection
+        middleware = MessageMiddlewareExchange(self.host, self.exchange_name, self.route_keys)
+
+        shutdown_mock = Mock()
+        shutdown_mock.is_shutting_down.return_value = True
+        middleware.shutdown = shutdown_mock
+
+        user_callback = Mock()
+        wrapped_callback = middleware._wrap_callback(user_callback)
+
+        mock_ch = Mock()
+        mock_method = Mock()
+        mock_method.delivery_tag = "tag_shutdown"
+
+        wrapped_callback(mock_ch, mock_method, Mock(), b"body")
+
+        shutdown_mock.is_shutting_down.assert_called_once()
+        user_callback.assert_not_called()
+        mock_ch.basic_ack.assert_called_once_with(delivery_tag="tag_shutdown")
+        mock_ch.stop_consuming.assert_called_once()
 
 
 if __name__ == '__main__':

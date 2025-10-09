@@ -49,7 +49,7 @@ class HourNodeConfigurator(NodeConfigurator):
             middlewares['q1'].send(filtered_dto.to_bytes_fast(), headers=headers)
         
         if 'q3' in middlewares:
-            self._send_to_exchange_by_semester(data, middlewares['q3'])
+            self._send_to_exchange_by_semester(data, middlewares['q3'], headers)
 
     def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
         headers = self.create_headers(client_id)
@@ -62,11 +62,12 @@ class HourNodeConfigurator(NodeConfigurator):
         if 'q3' in middlewares:
             middlewares['q3'].send(
                 eof_dto.to_bytes_fast(),
-                routing_key='eof.all'
+                routing_key='eof.all',
+                headers=headers,
             )
             logger.info("EOF:1 enviado a Q3 exchange con routing key 'eof.all'")
             
-    def _send_to_exchange_by_semester(self, csv_data: str, exchange_middleware):
+    def _send_to_exchange_by_semester(self, csv_data: str, exchange_middleware, headers):
         semester_1_lines = []
         semester_2_lines = []
         
@@ -84,12 +85,20 @@ class HourNodeConfigurator(NodeConfigurator):
         if semester_1_lines:
             csv_s1 = '\n'.join(semester_1_lines)
             dto_s1 = TransactionBatchDTO(csv_s1, batch_type=BatchType.RAW_CSV)
-            exchange_middleware.send(dto_s1.to_bytes_fast(), routing_key='semester.1')
+            exchange_middleware.send(
+                dto_s1.to_bytes_fast(),
+                routing_key='semester.1',
+                headers=headers,
+            )
         
         if semester_2_lines:
             csv_s2 = '\n'.join(semester_2_lines)
             dto_s2 = TransactionBatchDTO(csv_s2, batch_type=BatchType.RAW_CSV)
-            exchange_middleware.send(dto_s2.to_bytes_fast(), routing_key='semester.2')
+            exchange_middleware.send(
+                dto_s2.to_bytes_fast(),
+                routing_key='semester.2',
+                headers=headers,
+            )
     
     @staticmethod
     def _get_month_from_csv_line(line):

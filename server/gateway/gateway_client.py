@@ -1,8 +1,10 @@
 from dataclasses import asdict
 import threading
+from queue import Queue, Empty
+from typing import Dict, List
 from common.new_protocolo import ProtocolMessage, ProtocolNew
 from logger import get_logger
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareExchange
 from dtos.dto import BatchType, MenuItemBatchDTO, ReportBatchDTO, StoreBatchDTO, TransactionBatchDTO, TransactionItemBatchDTO, UserBatchDTO
 
 logger = get_logger(__name__)
@@ -23,26 +25,8 @@ class ClientHandler(threading.Thread):
         
         self._output_middleware = gateway.get_output_middleware()
         self._join_middleware = gateway.get_join_middleware()
-        
-        self.reports_queue_name = f"reports_queue_client_{self.client_id}"
-        self.routing_key_pattern = f"client.{self.client_id}.#"
-        
-        self.reports_exchange_name = f"reports_client_{client_id}"
-        self.reports_queue_name = f"reports_queue_client_{client_id}"
-        
-        self.report_middleware = None
-        self._setup_middlewares()
-        
-        self.report_data = {
-            'q1': [],
-            #'q3': [],
-            #'q4': [],
-            #'q2_most_profit': [],
-            #'q2_best_selling': []
-        }
-        self.eof_count = 0
-        self.max_expected_reports = 5
-        
+        self._report_queue: "Queue[tuple[str, bytes]]" = Queue()
+
         self.reports_config = [
             ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
             ('q3', self._convert_q3_to_csv, "Q3", "registros"),
@@ -50,28 +34,14 @@ class ClientHandler(threading.Thread):
             ('q2_most_profit', self._convert_q2_most_profit_to_csv, "Q2_MOST_PROFIT", "items"),
             ('q2_best_selling', self._convert_q2_best_selling_to_csv, "Q2_BEST_SELLING", "items")
         ]
+        self._expected_queries = [config[0] for config in self.reports_config]
+        self.max_expected_reports = len(self._expected_queries)
+
+        self.gateway.register_client(self)
         
         logger.info(f"ClientHandler {self.client_id} creado")
         
         
-    def _setup_middlewares(self):
-        try:
-            self.report_middleware = MessageMiddlewareQueue(
-                host=self.rabbitmq_host,
-                queue_name=f'reports_queue_client_{self.client_id}',  # Queue única
-                exchange_name=self.input_reports,  # Exchange compartido
-                routing_keys=[f'client.{self.client_id}.#']  # Pattern que matchea todo para este cliente
-            )
-
-            if self.shutdown and hasattr(self.report_middleware, 'shutdown'):
-                self.report_middleware.shutdown = self.shutdown
-
-            logger.info(f"Cliente {self.client_id}: Infraestructura de reportes creada")
-
-        except Exception as e:
-            logger.error(f"Cliente {self.client_id}: Error configurando reportes: {e}")
-            raise
-            
     def run(self):
         self._is_running = True
         logger.info(f"ClientHandler {self.client_id} iniciado")
@@ -134,12 +104,20 @@ class ClientHandler(threading.Thread):
                 
             elif file_type == "S":
                 eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='stores.data')
+                self._join_middleware.send(
+                    eof_dto.to_bytes_fast(),
+                    routing_key='stores.data',
+                    headers={'client_id': self.client_id}
+                )
                 logger.info("EOF:1 enviado para tipo S (stores)")
 
             elif file_type == "U":
                 eof_dto = UserBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='users.eof')
+                self._join_middleware.send(
+                    eof_dto.to_bytes_fast(),
+                    routing_key='users.eof',
+                    headers={'client_id': self.client_id}
+                )
                 logger.info("EOF:1 enviado para tipo U (users)")
                 
             elif file_type == "I":
@@ -149,7 +127,11 @@ class ClientHandler(threading.Thread):
 
             elif file_type == "M":
                 eof_dto = MenuItemBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='menu_items.data')
+                self._join_middleware.send(
+                    eof_dto.to_bytes_fast(),
+                    routing_key='menu_items.data',
+                    headers={'client_id': self.client_id}
+                )
                 logger.info("M:EOF:1 enviado para tipo M (menu_items)")
 
         except Exception as e:
@@ -176,7 +158,11 @@ class ClientHandler(threading.Thread):
             serialized_data = dto.to_bytes_fast()
 
 
-            self._join_middleware.send(serialized_data, routing_key='stores.data')
+            self._join_middleware.send(
+                serialized_data,
+                routing_key='stores.data',
+                headers={'client_id': self.client_id}
+            )
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
@@ -191,7 +177,11 @@ class ClientHandler(threading.Thread):
             serialized_data = dto.to_bytes_fast()
 
 
-            self._join_middleware.send(serialized_data, routing_key='users.data')
+            self._join_middleware.send(
+                serialized_data,
+                routing_key='users.data',
+                headers={'client_id': self.client_id}
+            )
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
@@ -206,7 +196,11 @@ class ClientHandler(threading.Thread):
             serialized_data = dto.to_bytes_fast()
 
 
-            self._join_middleware.send(serialized_data, routing_key='menu_items.data')
+            self._join_middleware.send(
+                serialized_data,
+                routing_key='menu_items.data',
+                headers={'client_id': self.client_id}
+            )
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
@@ -219,66 +213,104 @@ class ClientHandler(threading.Thread):
         if self.shutdown and self.shutdown.is_shutting_down():
             logger.info("Shutdown activo, no esperando reportes")
             return
-        
+
         try:
-            logger.info("Esperando reportes del pipeline...")
-            
+            logger.info("Cliente %s esperando reportes del pipeline...", self.client_id)
+            self._drain_pending_reports()
             report_data = self._collect_reports_from_pipeline()
-            
             self._send_reports_to_client(report_data)
-            self.report_middleware.close()
-            
         except Exception as e:
             logger.error(f"Error esperando reportes: {e}")
             self._send_error_to_client(f"Error processing reports: {e}")
 
-    def _collect_reports_from_pipeline(self):
-        """Recopila todos los reportes del pipeline."""
-        report_data = {
-            'q1': [],
-            #'q3': [],
-            #'q4': [],
-            #'q2_most_profit': [],
-            #'q2_best_selling': []
-        }
-        eof_count = 0
-        
-        def report_callback(ch, method, properties, body):
-            nonlocal eof_count
-           
-            if self.shutdown and self.shutdown.is_shutting_down():
-                logger.info("Shutdown detectado, deteniendo recepción de reportes")
-                ch.stop_consuming()
-                return    
-                    
-            try:
-                dto = ReportBatchDTO.from_bytes_fast(body)
-                routing_key = method.routing_key
-                # query_name = routing_key.split('.')[0]
-                parts = routing_key.split('.')
-                query_name = parts[2] if len(parts) >= 3 else parts[0] 
-                
-                logger.info(f"Recibido mensaje para {query_name}: {dto.batch_type}, routing: {routing_key}")
+    def _collect_reports_from_pipeline(self) -> Dict[str, List[Dict]]:
+        report_data: Dict[str, List[Dict]] = {query: [] for query in self._expected_queries}
+        eof_received = set()
+        idle_iterations = 0
+        max_idle_iterations = 120  # ~60 segundos
 
-                if dto.batch_type == BatchType.EOF:
-                    eof_count += 1
-                    logger.info(f"EOF recibido para {query_name}. Total EOF: {eof_count}")
-                    
-                    
-                    if eof_count >= self.max_expected_reports:
-                        logger.info("Todos los reportes recibidos completamente")
-                        ch.stop_consuming()
-                    return
-                
-                if dto.batch_type == BatchType.RAW_CSV:
-                    self._process_report_batch(dto.data, query_name, report_data)
-                    logger.info(f"Batch procesado: Q1={len(report_data['q1'])}, Q3={len(report_data['q3'])}, Q4={len(report_data['q4'])}")
-                    
-            except Exception as e:
-                logger.error(f"Error procesando batch del reporte: {e}")
-        
-        self.report_middleware.start_consuming(report_callback)
+        while len(eof_received) < self.max_expected_reports and self._is_running:
+            if self.shutdown and self.shutdown.is_shutting_down():
+                logger.info("Shutdown detectado, abortando recolección de reportes")
+                break
+
+            try:
+                routing_key, body = self._report_queue.get(timeout=0.5)
+            except Empty:
+                idle_iterations += 1
+                if idle_iterations >= max_idle_iterations:
+                    logger.warning(
+                        "Timeout esperando reportes para cliente %s. EOF recibidos: %s/%s",
+                        self.client_id,
+                        len(eof_received),
+                        self.max_expected_reports,
+                    )
+                    break
+                continue
+
+            idle_iterations = 0
+            dto = ReportBatchDTO.from_bytes_fast(body)
+            query_name = self._extract_query_from_routing(routing_key)
+
+            if query_name not in report_data:
+                logger.debug(
+                    "Cliente %s recibió reporte para query desconocida '%s' (routing %s)",
+                    self.client_id,
+                    query_name,
+                    routing_key,
+                )
+                continue
+
+            if dto.batch_type == BatchType.EOF:
+                if query_name not in eof_received:
+                    eof_received.add(query_name)
+                    logger.info(
+                        "Cliente %s recibió EOF para %s (%s/%s)",
+                        self.client_id,
+                        query_name,
+                        len(eof_received),
+                        self.max_expected_reports,
+                    )
+                continue
+
+            if dto.batch_type == BatchType.RAW_CSV:
+                self._process_report_batch(dto.data, query_name, report_data)
+
         return report_data
+
+    def enqueue_report_message(self, routing_key: str, body: bytes):
+        if not self._is_running:
+            logger.debug(
+                "Cliente %s no está corriendo, descartando reporte con routing %s",
+                self.client_id,
+                routing_key,
+            )
+            return
+        self._report_queue.put((routing_key, body))
+
+    def _drain_pending_reports(self):
+        drained = 0
+        while True:
+            try:
+                self._report_queue.get_nowait()
+                drained += 1
+            except Empty:
+                break
+        if drained:
+            logger.debug(
+                "Cliente %s descartó %s reportes pendientes previos",
+                self.client_id,
+                drained,
+            )
+
+    @staticmethod
+    def _extract_query_from_routing(routing_key: str) -> str:
+        parts = routing_key.split('.') if routing_key else []
+        if len(parts) >= 3:
+            return parts[2]
+        if parts:
+            return parts[-1]
+        return ""
 
     def _process_report_batch(self, data, query_name, report_data):
         lines = data.strip().split('\n')
@@ -318,10 +350,18 @@ class ClientHandler(threading.Thread):
                     "sellings_qty": values[2]
                 })
 
+        logger.debug(
+            "Cliente %s - resumen parcial reportes: Q1=%s, Q3=%s, Q4=%s",
+            self.client_id,
+            len(report_data.get('q1', [])),
+            len(report_data.get('q3', [])),
+            len(report_data.get('q4', [])),
+        )
+
     def _send_reports_to_client(self, report_data):
 
         for query_key, converter_func, report_name, unit_name in self.reports_config:
-            transactions = report_data[query_key]
+            transactions = report_data.get(query_key, [])
           
             if self.shutdown and self.shutdown.is_shutting_down():
                 logger.info("Shutdown detectado, deteniendo envío de reportes")
@@ -419,22 +459,16 @@ class ClientHandler(threading.Thread):
 
     def _cleanup(self):
         logger.info(f"Limpiando ClientHandler {self.client_id}")
-        #self._is_running = False
-        
+        self._is_running = False
+
         try:
-            if hasattr(self, 'report_middleware') and self.report_middleware:
-                self.report_middleware.close()
+            self.gateway.unregister_client(self.client_id)
         except Exception as e:
-            logger.error(f"Error cerrando report_middleware: {e}")
-        
+            logger.error(f"Error removiendo cliente {self.client_id} del gateway: {e}")
+
         try:
             self.protocol.close()
         except Exception as e:
             logger.error(f"Error cerrando protocolo: {e}")
-                
-        try:
-            if self.report_middleware:
-                self.report_middleware.close()
-        except Exception as e:
-            logger.error(f"Error cerrando join_middleware: {e}")
+
         logger.info(f"ClientHandler {self.client_id} finalizado")

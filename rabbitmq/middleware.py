@@ -118,26 +118,16 @@ class MessageMiddlewareExchange(MessageMiddleware):
             self.channel.basic_qos(prefetch_count=1)
             
             logger.info(f"Esperando mensajes en exchange {self.exchange_name} con routing keys {self.route_keys}...")
-            
-            for method_frame, properties, body in self.channel.consume(
-                self.consumer_queue,
+
+            consume_callback = self._wrap_callback(on_message_callback)
+            self.channel.basic_consume(
+                queue=self.consumer_queue,
+                on_message_callback=consume_callback,
                 auto_ack=False,
-                inactivity_timeout=5  
-            ):
-                if self.shutdown and self.shutdown.is_shutting_down():
-                    logger.info("Shutdown detectado en exchange middleware, dejando de consumir")
-                    break
-                
-                if method_frame is None:
-                    continue
-                
-                try:
-                    on_message_callback(self.channel, method_frame, properties, body)
-                    self.channel.basic_ack(method_frame.delivery_tag)
-                except Exception as e:
-                    logger.error(f"Error en callback: {e}")
-                    self.channel.basic_nack(method_frame.delivery_tag, requeue=True)
-                    
+            )
+
+            self.channel.start_consuming()
+
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Conexión con RabbitMQ perdida: {e}")
             raise MessageMiddlewareDisconnectedError("Conexión con RabbitMQ perdida")
@@ -152,12 +142,21 @@ class MessageMiddlewareExchange(MessageMiddleware):
     
     def _wrap_callback(self, user_callback):
         def wrapper(ch, method, properties, body):
+            if self.shutdown and self.shutdown.is_shutting_down():
+                logger.info("Shutdown detectado en exchange middleware, deteniendo consumo")
+                if method and getattr(method, 'delivery_tag', None) is not None:
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                ch.stop_consuming()
+                return
+
             try:
                 user_callback(ch, method, properties, body)
-                ch.basic_ack(delivery_tag=method.delivery_tag)
+                if method and getattr(method, 'delivery_tag', None) is not None:
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
             except Exception as e:
                 logger.error(f"Error en callback: {e}")
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                if method and getattr(method, 'delivery_tag', None) is not None:
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
         return wrapper
 
     def stop_consuming(self):
@@ -255,27 +254,14 @@ class MessageMiddlewareQueue(MessageMiddleware):
             
             # Optimizado para throughput
             self.channel.basic_qos(prefetch_count=10)
-            
-            for method_frame, properties, body in self.channel.consume(
-                self.queue_name,
+
+            consume_callback = self._wrap_callback(on_message_callback)
+            self.channel.basic_consume(
+                queue=self.queue_name,
+                on_message_callback=consume_callback,
                 auto_ack=False,
-                inactivity_timeout=5
-            ):
-            
-                if self.shutdown and self.shutdown.is_shutting_down():
-                    logger.info("Shutdown detectado en middleware, dejando de consumir")
-                    break
-                
-                if method_frame is None:
-                    continue
-                
-                try:
-                    on_message_callback(self.channel, method_frame, properties, body)
-                    self.channel.basic_ack(method_frame.delivery_tag)
-                except Exception as e:
-                    logger.error(f"Error en callback: {e}")
-                    self.channel.basic_nack(method_frame.delivery_tag, requeue=True)
-                    
+            )
+
             self.channel.start_consuming()
         except MessageMiddlewareDisconnectedError:
             raise
@@ -291,11 +277,21 @@ class MessageMiddlewareQueue(MessageMiddleware):
             
     def _wrap_callback(self, user_callback):
         def wrapper(ch, method, properties, body):
+            if self.shutdown and self.shutdown.is_shutting_down():
+                logger.info("Shutdown detectado en middleware, deteniendo consumo")
+                if method and getattr(method, 'delivery_tag', None) is not None:
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                ch.stop_consuming()
+                return
+
             try:
                 user_callback(ch, method, properties, body)
-                ch.basic_ack(delivery_tag=method.delivery_tag)
+                if method and getattr(method, 'delivery_tag', None) is not None:
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
             except Exception as e:
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                logger.error(f"Error en callback: {e}")
+                if method and getattr(method, 'delivery_tag', None) is not None:
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
         return wrapper
 
     def _callback_wrapper(self, ch, method, properties, body, on_message_callback):

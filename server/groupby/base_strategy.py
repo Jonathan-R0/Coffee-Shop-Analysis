@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from typing import Optional
 from dtos.dto import TransactionBatchDTO, BatchType
 from rabbitmq.middleware import MessageMiddlewareExchange
 
@@ -12,11 +13,7 @@ class GroupByStrategy(ABC):
         self.dto_helper = TransactionBatchDTO("", BatchType.RAW_CSV)
     
     @abstractmethod
-    def process_csv_line(self, csv_line: str):
-        pass
-    
-    @abstractmethod
-    def generate_results_csv(self) -> str:
+    def process_csv_line(self, csv_line: str, client_id: int):
         pass
     
     def get_output_routing_key(self) -> str:
@@ -30,7 +27,7 @@ class GroupByStrategy(ABC):
         pass
     
     @abstractmethod
-    def handle_eof_message(self, dto: TransactionBatchDTO, middlewares: dict) -> bool:
+    def handle_eof_message(self, dto: TransactionBatchDTO, middlewares: dict, client_id: int) -> bool:
         pass
     
     def cleanup_middlewares(self, middlewares: dict):

@@ -92,22 +92,19 @@ class FilterNode:
 
 
 
-    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> bool:
+    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> None:
         if self.shutdown.is_shutting_down():
             logger.warning("Shutdown en progreso, ignorando mensaje")
             return True
         
         try:
-            
-            should_stop, batch_type, dto, is_eof = self.node_configurator.process_message(
+            _, batch_type, dto, is_eof = self.node_configurator.process_message(
                 body, routing_key
             )
             
             if is_eof:
-                return self._handle_eof_message(dto, batch_type, client_id)
-            
-            if should_stop:
-                return True
+                self._handle_eof_message(dto, batch_type, client_id)
+                return
                         
             decoded_data = body.decode('utf-8').strip()
             
@@ -126,16 +123,14 @@ class FilterNode:
             
             if self.shutdown.is_shutting_down():
                 logger.warning("Shutdown en progreso, no se enviarán datos")
-                return True
+                return
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type,client_id)
-            
-            return False
 
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
-            return False
+            return
         
     def _handle_eof_message(self, dto: TransactionBatchDTO, eof_type: str,client_id: Optional[int] = None) -> bool:
         try:
@@ -156,15 +151,16 @@ class FilterNode:
                 input_middleware=self.input_middleware,
                 client_id=client_id
             )
-            
             if should_stop:
-                logger.info("Configurador indica que debe cerrarse el nodo")
-            
-            return should_stop
+                logger.info(
+                    "EOF completo para cliente %s, tipo %s",
+                    client_id,
+                    eof_type,
+                )
             
         except Exception as e:
             logger.error(f"Error manejando EOF: {e}")
-            return False
+            return
         
         
     def on_message_callback(self, ch, method, properties, body):
@@ -182,11 +178,7 @@ class FilterNode:
                 return
         
             routing_key = method.routing_key if hasattr(method, 'routing_key') else None
-            should_stop = self.process_message(body, routing_key,client_id)
-            
-            if should_stop:
-                logger.info("EOF procesado - deteniendo consuming")
-                ch.stop_consuming()
+            self.process_message(body, routing_key,client_id)
         except Exception as e:
             logger.error(f"Error en callback: {e}")
 

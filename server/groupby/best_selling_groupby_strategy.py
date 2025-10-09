@@ -1,10 +1,9 @@
 import logging
 import os
-from collections import defaultdict
 from typing import Dict
 from base_strategy import GroupByStrategy
 from dtos.dto import TransactionItemBatchDTO, BatchType
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareExchange
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +26,7 @@ class BestSellingGroupByStrategy(GroupByStrategy):
     def __init__(self, input_queue_name: str):
         super().__init__()  
         self.input_queue_name = input_queue_name
-        self.month_item_aggregations: Dict[str, Dict[str, ItemAggregation]] = defaultdict(
-            lambda: defaultdict(lambda: None)
-        )
+        self.client_states: Dict[int, Dict[str, Dict[str, ItemAggregation]]] = {}
         self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
                 
         self.year = os.getenv('AGGREGATOR_YEAR','2024')
@@ -50,8 +47,14 @@ class BestSellingGroupByStrategy(GroupByStrategy):
 
         return {"output": output_middleware}
     
-    def process_csv_line(self, csv_line: str):
+    def _get_state(self, client_id: int) -> Dict[str, Dict[str, ItemAggregation]]:
+        if client_id not in self.client_states:
+            self.client_states[client_id] = {}
+        return self.client_states[client_id]
+
+    def process_csv_line(self, csv_line: str, client_id: int):
         try:
+            month_item_aggregations = self._get_state(client_id)
             item_id = self.dto_helper.get_column_value(csv_line, 'item_id')
             created_at = self.dto_helper.get_column_value(csv_line, 'created_at')
             quantity_str = self.dto_helper.get_column_value(csv_line, 'quantity') 
@@ -64,23 +67,23 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             quantity = int(quantity_str) 
             subtotal = float(subtotal_str)
             
-            if self.month_item_aggregations[year_month][item_id] is None:
-                self.month_item_aggregations[year_month][item_id] = ItemAggregation(item_id)
-            
-            self.month_item_aggregations[year_month][item_id].add_transaction(quantity, subtotal)  
+            month_data = month_item_aggregations.setdefault(year_month, {})
+            if item_id not in month_data:
+                month_data[item_id] = ItemAggregation(item_id)
+            month_data[item_id].add_transaction(quantity, subtotal)
             
         except (ValueError, IndexError) as e:
             logger.warning(f"Error procesando línea: {e}")
     
-    def generate_results_csv(self) -> str:
-        if not self.month_item_aggregations:
+    def generate_results_csv(self, month_item_aggregations: Dict[str, Dict[str, ItemAggregation]]) -> str:
+        if not month_item_aggregations:
             logger.warning("No hay datos locales para generar")
             return "created_at,item_id,sellings_qty,profit_sum"
         
         csv_lines = ["created_at,item_id,sellings_qty,profit_sum"]
         
-        for year_month in sorted(self.month_item_aggregations.keys()):
-            item_aggs = self.month_item_aggregations[year_month]
+        for year_month in sorted(month_item_aggregations.keys()):
+            item_aggs = month_item_aggregations[year_month]
             for item_agg in item_aggs.values():
                 csv_lines.append(item_agg.to_csv_line(year_month))
         
@@ -88,19 +91,21 @@ class BestSellingGroupByStrategy(GroupByStrategy):
         logger.info(f"Datos locales generados: {total_records} registros")
         return '\n'.join(csv_lines)
     
-    def handle_eof_message(self, dto: TransactionItemBatchDTO, middlewares: dict) -> bool:
+    def handle_eof_message(self, dto: TransactionItemBatchDTO, middlewares: dict, client_id: int) -> bool:
         try:
             eof_data = dto.data.strip()
             counter = int(eof_data.split(':')[1]) if ':' in eof_data else 1
             
             logger.info(f"EOF recibido con counter={counter}, total={self.total_groupby_nodes}")
             
-            self._send_data_by_month(middlewares["output"])
+            month_item_aggregations = self.client_states.get(client_id, {})
+            headers = {'client_id': client_id}
+            self._send_data_by_month(middlewares["output"], month_item_aggregations, headers)
             
             if counter < self.total_groupby_nodes:
                 new_counter = counter + 1
                 eof_dto = TransactionItemBatchDTO(f"EOF:{new_counter}", BatchType.EOF)
-                middlewares["input_queue"].send(eof_dto.to_bytes_fast())
+                middlewares["input_queue"].send(eof_dto.to_bytes_fast(), headers=headers)
                 logger.info(f"EOF:{new_counter} reenviado a input queue")
                 logger.info("Datos enviados - esperando otros nodos")
                 #return False  
@@ -108,28 +113,33 @@ class BestSellingGroupByStrategy(GroupByStrategy):
                 logger.info(f"Último nodo GroupBy del año {self.year} - iniciando EOF para aggregators")
                 eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
                 
-                middlewares["output"].send(eof_dto.to_bytes_fast(), routing_key=self.year)
+                middlewares["output"].send(
+                    eof_dto.to_bytes_fast(),
+                    routing_key=self.year,
+                    headers=headers,
+                )
                 logger.info(f"EOF:1 enviado al topic '{self.year}' para aggregators intermediate")
             
-                print(f"{'='*60}\n")
-                #return True
+                if client_id in self.client_states:
+                    del self.client_states[client_id]
+                    logger.debug(f"Estado BestSelling limpiado para cliente {client_id}")
             return True
                         
         except Exception as e:
             logger.error(f"Error manejando EOF: {e}")
             return False
     
-    def _send_data_by_month(self, output_middleware):
-        if not self.month_item_aggregations:
+    def _send_data_by_month(self, output_middleware, month_item_aggregations: Dict[str, Dict[str, ItemAggregation]], headers):
+        if not month_item_aggregations:
             logger.warning("No hay datos locales para enviar")
             return
         
-        total_months = len(self.month_item_aggregations)
+        total_months = len(month_item_aggregations)
         logger.info(f"Enviando datos de {total_months} meses")
         
-        for year_month in sorted(self.month_item_aggregations.keys()):
+        for year_month in sorted(month_item_aggregations.keys()):
             month_csv_lines = ["created_at,item_id,sellings_qty,profit_sum"]
-            item_aggs = self.month_item_aggregations[year_month]
+            item_aggs = month_item_aggregations[year_month]
             
             for item_agg in item_aggs.values():
                 month_csv_lines.append(item_agg.to_csv_line(year_month))
@@ -137,7 +147,11 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             month_csv = '\n'.join(month_csv_lines)
             
             result_dto = TransactionItemBatchDTO(month_csv, BatchType.RAW_CSV)
-            output_middleware.send(result_dto.to_bytes_fast(), self.year)
+            output_middleware.send(
+                result_dto.to_bytes_fast(),
+                self.year,
+                headers=headers,
+            )
             
             logger.info(f"Month {year_month}: {len(month_csv_lines)-1} items → año '{self.year}'")
     

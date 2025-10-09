@@ -92,12 +92,12 @@ class YearNodeConfigurator(NodeConfigurator):
                 middlewares['q1'].send(filtered_dto.to_bytes_fast(), headers=headers)
             
             if 'q4' in middlewares:
-                middlewares['q4'].send(filtered_dto.to_bytes_fast())
+                middlewares['q4'].send(filtered_dto.to_bytes_fast(), headers=headers)
         
         elif batch_type == "transaction_items":
             logger.info(f"Procesando líneas de TransactionItems para Q2")
             if 'q2' in middlewares:
-                self._send_transaction_items_by_year(data, middlewares['q2'])
+                self._send_transaction_items_by_year(data, middlewares['q2'], headers)
 
     def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
         headers = self.create_headers(client_id)
@@ -109,14 +109,22 @@ class YearNodeConfigurator(NodeConfigurator):
                 logger.info("EOF:1 (TransactionBatch) enviado a Q1 queue")
             
             if 'q4' in middlewares:
-                middlewares['q4'].send(eof_dto.to_bytes_fast())
+                middlewares['q4'].send(eof_dto.to_bytes_fast(), headers=headers)
                 logger.info("EOF:1 (TransactionBatch) enviado a Q4 queue")
         
         elif batch_type == "transaction_items":
             if 'q2' in middlewares:
                 eof_dto = TransactionItemBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                middlewares['q2'].send(eof_dto.to_bytes_fast(), routing_key='2024')
-                middlewares['q2'].send(eof_dto.to_bytes_fast(), routing_key='2025')
+                middlewares['q2'].send(
+                    eof_dto.to_bytes_fast(),
+                    routing_key='2024',
+                    headers=headers,
+                )
+                middlewares['q2'].send(
+                    eof_dto.to_bytes_fast(),
+                    routing_key='2025',
+                    headers=headers,
+                )
                 logger.info("EOF:1 (TransactionItemBatch) enviado a Q2 exchange con routing keys 2024 y 2025")
     
     def handle_eof(self, counter: int, total_filters: int, eof_type: str, 
@@ -149,7 +157,7 @@ class YearNodeConfigurator(NodeConfigurator):
         input_middleware.send(eof_dto.to_bytes_fast(), headers=headers)
         logger.info(f"YearNode: {eof_message} reenviado")
     
-    def _send_transaction_items_by_year(self, data: str, q2_middleware):
+    def _send_transaction_items_by_year(self, data: str, q2_middleware, headers):
         lines = data.strip().split('\n')
         header = lines[0] if lines else ""
         
@@ -178,7 +186,11 @@ class YearNodeConfigurator(NodeConfigurator):
             if len(year_lines) > 1:
                 year_csv = '\n'.join(year_lines)
                 year_dto = TransactionItemBatchDTO(year_csv, batch_type=BatchType.RAW_CSV)
-                q2_middleware.send(year_dto.to_bytes_fast(), routing_key=year)
+                q2_middleware.send(
+                    year_dto.to_bytes_fast(),
+                    routing_key=year,
+                    headers=headers,
+                )
                 logger.info(f"TransactionItemBatchDTO enviado a Q2 con routing key {year}: {len(year_lines)-1} líneas")
             else:
                 logger.info(f"No hay datos para año {year} - solo header")
